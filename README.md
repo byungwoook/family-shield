@@ -1,3 +1,13 @@
+> **About this fork.** This is my fork of [khuzaymaa918/family-shield](https://github.com/khuzaymaa918/family-shield), which our team of four built at Cal Hacks 13.0. It won a Special Mention in Fetch.ai's Best Use of ASI category. I keep it here to show my part of the project.
+>
+> **My part: the verification call.**
+> - Cartesia speech-to-text and text-to-speech functions in `services/cartesia_tools.py`
+> - The Cartesia voice agent, set up in code with voicemail detection and automatic hang-up, in `services/cartesia_setup.py`
+> - Collecting the family check code on the keypad during the call and posting it to a bearer-authenticated webhook in `services/code_webhook.py`
+> - Fixes from mock judging in open pull requests [#20](https://github.com/khuzaymaa918/family-shield/pull/20) and [#21](https://github.com/khuzaymaa918/family-shield/pull/21): an unanswered call no longer counts as a no (which had raised a false scam alert), and agents accept messages only from each other
+>
+> My teammates built the rest of the system, including the Guardian and Scam Intel agents.
+
 # 🛡️ Family Shield
 
 ![tag:innovationlab](https://img.shields.io/badge/innovationlab-3D8BD3)
