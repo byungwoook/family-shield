@@ -193,7 +193,8 @@ cases
   claims          jsonb null            -- claimed_identity, amount, story, red_flags
   pattern_id      null                  -- from the catalog, or null
   code_channel    null | 'one_time' | 'static'  -- which code the live call is asking for
-  one_time_code_hash null               -- HMAC of this case's 6-digit code; never the code
+  one_time_nonce  null                  -- 16 random bytes; not the code
+  one_time_code_hash null               -- HMAC of the derived 6 digits; never the code
   one_time_code_expires_at null         -- 5 minutes after generation
   one_time_code_used_at null
   deadline_at     null                  -- when the current wait (push, code, or answer) expires
@@ -221,7 +222,7 @@ phone_otp
   id, phone_e164, code_hash, expires_at, attempts, consumed_at
 ```
 
-Do not store keypad digits, the static check code, the one-time code, call recordings, or Cartesia transcripts. The one-time code's plaintext is held in process memory for at most 5 minutes and is never a column. `verification_attempts.provider_ref` is an id, not audio. `GET /v1/cases/{id}` returns neither code.
+Do not store keypad digits, the static check code, the one-time code, call recordings, or Cartesia transcripts. The one-time digits are not a column and not process memory. Postgres stores `one_time_nonce` (16 random bytes), the HMAC of the digits, expiry, and used-at. Any server recomputes the digits from the case id, the nonce, and `OTP_DERIVATION_KEY`. `verification_attempts.provider_ref` is an id, not audio. `GET /v1/cases/{id}` returns neither code nor the nonce.
 
 `cases.result` uses today's `CodeResult.result` values plus the Guardian branches that never became a `CodeResult` (`no_number`, `call_failed`, `timeout`). The color is a function of `result`, not a second source of truth:
 
@@ -382,11 +383,11 @@ A yes on the call while `number_recent` is true does not enter `confirmed`. The 
 | No app (`user_id` null) | The 4-digit static check code | There is nowhere to show a one-time code. |
 | App linked, but they press star before submitting six digits | The static check code, on the same call | They have the app and cannot look at the screen. A wrong six-digit submission hangs up; it does not then offer the check code. |
 
-The one-time code is generated only when the case enters `calling` for an app-linked child. Answering the push inside 90 seconds places no call and generates no code. The code is 6 digits from `secrets`, valid for 5 minutes, single use, and checked with HMAC-SHA256 and `CODE_PEPPER` (`hmac.compare_digest`). Postgres stores the hash, `one_time_code_expires_at`, and `one_time_code_used_at`. The plaintext sits in process memory, keyed by case id, and is wiped on use, on expiry, and on process restart. It is not an SMS, not a column, and not in the push payload.
+The one-time code is generated only when the case enters `calling` for an app-linked child. Answering the push inside 90 seconds places no call and generates no code. The server draws a 16-byte nonce and stores that nonce, an HMAC-SHA256 of the digits keyed with `CODE_PEPPER`, `one_time_code_expires_at` (5 minutes), and `one_time_code_used_at`. The digits themselves are not stored. They are `HMAC-SHA256(OTP_DERIVATION_KEY, case id || nonce)`, reduced to 6 digits by rejection sampling: the 256-bit digest is an integer, and a value in the leftover tail above the largest multiple of 1,000,000 is discarded and the HMAC is retried with a 4-byte counter. That keeps every 6-digit string equally likely. `OTP_DERIVATION_KEY` is a server secret, separate from `CODE_PEPPER`, and it is never written to the database. Any server that has the key recomputes the same digits from the case id and the nonce, including after a restart and on another instance. Keypad verification still compares the submitted digits with the stored hash using `hmac.compare_digest`. Expiry and single use stay on the database columns. A re-issue stores a new nonce and a new hash, and the previous digits no longer match. The code is not an SMS, not a column, and not in the push payload.
 
-The child reads it from `GET /v1/cases/{id}/call-code` with their session. The app calls that only after Face ID or BiometricPrompt and shows the digits on the next screen. A parent session gets 403. If the process restarted and the plaintext is gone, the response is `{ "code": null, "fallback": "static" }` and the screen says to press star and enter the check code. A restart does not invent a new code; the hash in Postgres would no longer match.
+The child reads it from `GET /v1/cases/{id}/call-code` with their session. The handler recomputes the digits from the stored nonce. The app calls that only after Face ID or BiometricPrompt and shows the digits on the next screen. A parent session gets 403. If the code is already used or expired, the response is `{ "code": null, "fallback": "static" }` and the screen says to press star and enter the check code. A restart does not invent a new code.
 
-A match sets `one_time_code_used_at` and wipes the plaintext. A second submission of the same code is `code_rejected`. An expired code is the same outcome on the call (hang up, yellow). The timeline step distinguishes "one-time code expired" from "code did not match". The parent-facing sentence is the same yellow wrong-code sentence either way.
+A match sets `one_time_code_used_at`. A second submission of the same code is `code_rejected`. An expired code is the same outcome on the call (hang up, yellow). The timeline step distinguishes "one-time code expired" from "code did not match". The parent-facing sentence is the same yellow wrong-code sentence either way.
 
 SMS OTP is only the proof that a handset controls a number, at signup and at number change. It is never accepted as the code on a verification call, and the one-time call code is never texted.
 
@@ -567,14 +568,14 @@ A voice note enters through the iOS Share Extension or the Android `ACTION_SEND`
 | Secret | Handling |
 | --- | --- |
 | Static check code | The child sets it. The parent never sees it, including for a child with no app (they type it on the allow page themselves). `backend/codes.py` stores an argon2id PHC string of `pepper + code` with the per-member salt. Pepper is `CODE_PEPPER`, required at startup, not in the database. Verification uses argon2-cffi's verify, which is constant-time. One wrong submission ends the call. Five static mismatches for that child in 24 hours lock the code until the child sets a new one. The lock counts mismatches after `code_set_at` only. |
-| One-time call code | 6 digits, generated by the server when an app-linked case enters `calling`. HMAC-SHA256 with `CODE_PEPPER`, compared with `hmac.compare_digest`. Single use, 5 minutes, one guess. Plaintext exists only in process memory. The app shows it only after biometric unlock. It is not sent by SMS and not sent to the parent. |
+| One-time call code | 6 digits, derived when an app-linked case enters `calling`. HMAC-SHA256 of `OTP_DERIVATION_KEY` over the case id concatenated with a 16-byte nonce, reduced to 6 digits by rejection sampling. Postgres stores the nonce and an HMAC of the digits keyed with `CODE_PEPPER`. Verification compares the keypad digits to that hash with `hmac.compare_digest`. The digits are recomputed on demand, so a restart or another instance shows the same code. Single use, 5 minutes, one guess. The app shows it only after biometric unlock. It is not sent by SMS and not sent to the parent. |
 | SMS OTP | Proves control of a phone number at signup and at number change. Six digits, hashed, five tries, then the challenge dies. It is not accepted on the verification call, and the call's one-time code is a different value. |
 | Invite secret, session token | Random, stored only as a hash, single use or revocable, expiry as above. |
 | `CODE_WEBHOOK_SECRET` | Existing bearer check for the hackathon Cartesia webhook, `hmac.compare_digest` over the whole header (`_check_auth`). Required only while that agent is still running. |
 | Twilio auth token | Validates `X-Twilio-Signature` on `/voice/twilio/*`. Required in the product boot path. |
 | Provider keys | Environment only. `cartesia_setup.py` already redacts the webhook secret from error text. Keep that habit for Twilio errors: do not log the auth token or `Digits`. |
 
-Fail closed when `CODE_PEPPER`, `CODE_WEBHOOK_SECRET`, or `DATABASE_URL` is missing. Do not copy `trusted()`'s "blank address means allow".
+Fail closed when `CODE_PEPPER`, `OTP_DERIVATION_KEY`, `CODE_WEBHOOK_SECRET`, or `DATABASE_URL` is missing. Do not copy `trusted()`'s "blank address means allow".
 
 ### Abuse cases
 
@@ -729,7 +730,7 @@ One manual SMS to a `+82` phone the owner controls. If the carrier blocks it, th
 
 `backend/calls.py` places the Twilio call and maps outcomes to TwiML. `call_language("+821012345678")` is `ko`. `call_language("+14155550123")` is `en`. Tests monkeypatch the Twilio client. An app-linked child gets `one_time_greeting` and `<Gather input="dtmf" numDigits="6" finishOnKey="*">`. Star (`Digits` empty) returns `static_switch` and `numDigits="4"`. A child with no `user_id` gets `static_greeting` and `numDigits="4"`. A wrong code returns `code_failed` and `<Hangup>`, and the case is `wrong`. A missing or bad `X-Twilio-Signature` is 403. A `no-answer` status callback yields yellow `timeout`, never `not_sent`. Recording is off.
 
-`GET /v1/cases/{id}/call-code` returns the plaintext to the child session while the in-memory copy is alive, and 403 to the parent. A test wipes the memory and expects `{ "code": null, "fallback": "static" }`.
+`GET /v1/cases/{id}/call-code` derives the digits from the stored nonce and returns them to the child session while the code is unused and unexpired, and 403 to the parent. A second process with the same `OTP_DERIVATION_KEY` returns the same digits. A used or expired code returns `{ "code": null, "fallback": "static" }`.
 
 Check in the twelve mp3 files, produced by a small script that calls `make_voice_message` once per line. Tests do not call Cartesia; they assert the files exist and the TwiML points at them. Do not import `deliver_voice_message`. Add a short pointer in `services/CARTESIA.md` that the product call is Twilio and Cartesia's job is STT plus these files. Leave the hackathon agent setup as it is.
 
@@ -804,7 +805,7 @@ Do not start this until v1 cases are in use and a lawyer has answered the licens
 1. **Parents are not iPhone-only.** Decided: native apps on both platforms, parent and child roles in each. iOS is SwiftUI. Android is Kotlin. Sign-in is Apple on iOS and Google on Android, because a Korean parent on Android should not need an Apple ID. The invite is what links them.
 2. **Child numbers are not US-only.** Decided: v1 places the fallback call to `+1` and to `+82`. Other country codes are rejected at enrollment.
 3. **The fallback call does not use a voice agent.** Decided: primary is push plus a biometric answer. Fallback is Twilio `<Play>` of a prerecorded Cartesia mp3 and `<Gather input="dtmf">`. The code comes first, then 1 or 2. No LLM on the call. Language comes from the number (`+82` Korean, `+1` English), not from the device locale. Cartesia remains for voice-note STT and for rendering those files. Claude remains for claims and the pattern id only.
-4. **Who knows the code.** Decided: only the child. They set the 4-digit check code in the app, or on the allow page if they have no app. The parent never sees it. It is stored as argon2id with a pepper. A forgotten code is reset by the child after a biometric check, or through a new SMS link if they have no app. One wrong code on a call hangs up immediately. Five static mismatches in 24 hours lock that code until the child resets it. When the child has the app but missed the push, the fallback call asks for a server-generated 6-digit code instead, shown in the app only after biometric unlock, one code per case, 5 minutes, single use, stored as a hash. Pressing star on that call switches to the static check code. SMS OTP only proves the number at signup and number change. It is not a code on the verification call.
+4. **Who knows the code.** Decided: only the child. They set the 4-digit check code in the app, or on the allow page if they have no app. The parent never sees it. It is stored as argon2id with a pepper. A forgotten code is reset by the child after a biometric check, or through a new SMS link if they have no app. One wrong code on a call hangs up immediately. Five static mismatches in 24 hours lock that code until the child resets it. When the child has the app but missed the push, the fallback call asks for a 6-digit code derived from a per-case nonce and `OTP_DERIVATION_KEY`, shown in the app only after biometric unlock, one code per case, 5 minutes, single use. Postgres stores the nonce and a hash of the digits, not the digits. Any instance recomputes them. A re-issue replaces the nonce and the old digits stop matching. Pressing star on that call switches to the static check code. SMS OTP only proves the number at signup and number change. It is not a code on the verification call.
 5. **A number registered or changed in the last 24 hours.** Decided: not a hard block, and not a banner. A yes obtained on a call to that number is stored as `number_recent` and shown yellow, with copy that the number changed recently. A no on that call is still red. A yes from the enrolled device stays green. Any number change notifies the parent app immediately, and notifies the old number by SMS. Safe Wallet, later, treats `number_recent` as a refund, not a release.
 
 ### Still open

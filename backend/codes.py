@@ -1,16 +1,21 @@
 """Check codes for the verification fallback call.
 
-Pure aside from reading CODE_PEPPER. The caller passes `now` and, when a
-code must be chosen, an rng. This module does not log codes. The only
-plaintext it hands back is from `generate_one_time` and `issue_one_time`,
-for the in-memory holder the product design keeps for at most five minutes.
-`repr` hides that plaintext.
+Pure aside from reading CODE_PEPPER and OTP_DERIVATION_KEY. The caller
+passes `now` and, when a nonce or a salt must be chosen, an rng. This
+module does not log codes and does not keep a one-time code.
 
 `hash_code` / `verify_code` are the 4-digit static code: an argon2id PHC
 string of pepper + code with the per-member salt. `hash_one_time` /
 `verify_one_time` are the 6-digit code: HMAC-SHA256 keyed with the same
 pepper, compared with `hmac.compare_digest`. Those four functions do not
-look at expiry, single-use, or the lock.
+look at expiry, single-use, or the lock. Keypad verification keeps using
+them against the stored hash. Expiry and single-use stay on the case row.
+
+`derive_one_time` rebuilds those 6 digits from the case id and the per-case
+nonce. The key is OTP_DERIVATION_KEY, not CODE_PEPPER, and it is not stored.
+The digest is reduced with rejection sampling so every 6-digit string is
+equally likely. RFC 4226 dynamic truncation then `mod 10**6` is not used:
+a 31-bit integer is not divisible by 1_000_000, so that modulo is biased.
 
 `submission_event` is the caller those columns belong to. It returns an
 event `backend.verify.apply` already understands, and it does not call
@@ -26,6 +31,7 @@ import re
 import secrets
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from uuid import UUID
 
 from argon2.exceptions import (
     InvalidHashError,
@@ -46,6 +52,11 @@ _SALT_LEN = 16
 _LOCK_LIMIT = 5
 _LOCK_WINDOW = timedelta(hours=24)
 _ONE_TIME_TTL = timedelta(minutes=5)
+_NONCE_LEN = 16
+# Largest multiple of 1_000_000 that fits in an HMAC-SHA256 digest.
+# Digests at or above this limit are the biased tail and are discarded.
+_DIGIT_SPACE = 1_000_000
+_DIGIT_LIMIT = ((1 << 256) // _DIGIT_SPACE) * _DIGIT_SPACE
 _FOUR_DIGITS = re.compile(r"[0-9]{4}")
 _SIX_DIGITS = re.compile(r"[0-9]{6}")
 _VERIFY_ERRORS = (
@@ -59,6 +70,10 @@ _VERIFY_ERRORS = (
 
 class CodeConfigError(RuntimeError):
     """CODE_PEPPER is unset, empty, or whitespace."""
+
+
+class DerivationKeyError(RuntimeError):
+    """OTP_DERIVATION_KEY is unset, empty, or whitespace."""
 
 
 class BiometricRequired(Exception):
@@ -76,9 +91,9 @@ class StaticCode:
 
 @dataclass(frozen=True)
 class OneTimeCode:
-    """Plaintext for process memory, plus the hash and expiry to store."""
+    """Nonce and hash to store. The digits are not a field."""
 
-    code: str = field(repr=False)
+    nonce: bytes = field(repr=False)
     code_hash: str = field(repr=False)
     expires_at: datetime
 
@@ -170,28 +185,54 @@ def verify_one_time(code: str, stored: str) -> bool:
     return _consteq(hash_one_time(code), stored)
 
 
-def generate_one_time(*, now: datetime, rng=None) -> OneTimeCode:
-    """One 6-digit code for the case that just entered `calling`.
+def derive_one_time(case_id, nonce: bytes) -> str:
+    """The 6 digits for this case and nonce.
 
-    `rng` returns an int in 0..999999. The default is `secrets.randbelow`.
-    The plaintext is on the returned object and is omitted from `repr`.
+    The first HMAC is SHA-256(OTP_DERIVATION_KEY, case_id || nonce), with
+    the case id as 16 canonical UUID bytes. The digest is an integer. If it
+    is below the largest multiple of 1_000_000 that fits in 256 bits, the
+    code is that integer mod 1_000_000. Otherwise the digest is in the
+    biased tail, it is discarded, and the HMAC is retried over
+    case_id || nonce || counter (4-byte big-endian, starting at 1).
+    """
+    key = _derivation_key()
+    prefix = _case_id_bytes(case_id) + _require_nonce(nonce)
+    counter = 0
+    while counter <= 8:
+        message = prefix if counter == 0 else prefix + counter.to_bytes(4, "big")
+        digest = hmac.new(key.encode("utf-8"), message, hashlib.sha256).digest()
+        code = _uniform_six_digits(digest)
+        if code is not None:
+            return code
+        counter += 1
+    raise RuntimeError("one-time code derivation rejected too many digests")
+
+
+def generate_one_time(*, case_id, now: datetime, rng=None) -> OneTimeCode:
+    """Draw a nonce and hash the digits it derives. The digits are not stored.
+
+    `rng`, if passed, is `rng(16) -> bytes`. The default is
+    `secrets.token_bytes`. The same case id and nonce always derive the
+    same digits. The hash is what `verify_one_time` checks.
     """
     _require_aware(now, "now")
-    number = _draw_code(rng)
-    code = f"{number:06d}"
-    return OneTimeCode(code, hash_one_time(code), now + _ONE_TIME_TTL)
+    nonce = _new_nonce(rng)
+    code = derive_one_time(case_id, nonce)
+    return OneTimeCode(nonce, hash_one_time(code), now + _ONE_TIME_TTL)
 
 
 def issue_one_time(case: dict, *, now: datetime, rng=None) -> OneTimeCode | None:
     """Issue a code only when this case is in `calling` on the one-time channel.
 
-    Push answers and static calls get nothing. Call this once per transition
-    into that state; a second call is a different code.
+    Push answers and static calls get nothing. `case['id']` is required
+    because the digits are derived from it. Each call draws a new nonce.
     """
     _require_aware(now, "now")
     if case.get("state") != "calling" or case.get("code_channel") != "one_time":
         return None
-    return generate_one_time(now=now, rng=rng)
+    if "id" not in case:
+        raise ValueError("case id is required to derive a one-time code")
+    return generate_one_time(case_id=case["id"], now=now, rng=rng)
 
 
 def set_static_code(
@@ -333,6 +374,48 @@ def _pepper() -> str:
     return value
 
 
+def _derivation_key() -> str:
+    value = os.environ.get("OTP_DERIVATION_KEY")
+    if value is None or value.strip() == "":
+        raise DerivationKeyError("OTP_DERIVATION_KEY is required")
+    return value
+
+
+def _case_id_bytes(case_id: object) -> bytes:
+    if isinstance(case_id, UUID):
+        return case_id.bytes
+    if isinstance(case_id, str):
+        try:
+            return UUID(case_id).bytes
+        except ValueError:
+            raise ValueError("case id must be a UUID") from None
+    raise TypeError("case id must be a UUID")
+
+
+def _require_nonce(nonce: object) -> bytes:
+    if type(nonce) is not bytes or len(nonce) != _NONCE_LEN:
+        raise ValueError("nonce must be 16 bytes")
+    return nonce
+
+
+def _new_nonce(rng) -> bytes:
+    if rng is None:
+        return secrets.token_bytes(_NONCE_LEN)
+    nonce = rng(_NONCE_LEN)
+    if type(nonce) is not bytes or len(nonce) != _NONCE_LEN:
+        raise ValueError("nonce rng must return 16 bytes")
+    return nonce
+
+
+def _uniform_six_digits(digest: bytes) -> str | None:
+    if len(digest) != 32:
+        raise ValueError("digest must be 32 bytes")
+    value = int.from_bytes(digest, "big")
+    if value >= _DIGIT_LIMIT:
+        return None
+    return f"{value % _DIGIT_SPACE:06d}"
+
+
 def _require_salt(salt: object) -> bytes:
     if not isinstance(salt, bytes) or len(salt) < _SALT_LEN:
         raise ValueError("salt must be at least 16 bytes")
@@ -346,15 +429,6 @@ def _new_salt(rng) -> bytes:
     if type(salt) is not bytes or len(salt) != _SALT_LEN:
         raise ValueError("salt rng must return 16 bytes")
     return salt
-
-
-def _draw_code(rng) -> int:
-    if rng is None:
-        return secrets.randbelow(1_000_000)
-    number = rng()
-    if type(number) is not int or not 0 <= number < 1_000_000:
-        raise ValueError("rng must return an int in 0..999999")
-    return number
 
 
 def _require_aware(value: object, label: str) -> datetime:
