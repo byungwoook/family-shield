@@ -1,0 +1,16 @@
+# Local Postgres for backend/store.py tests. Not a production database.
+#   docker compose up -d
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: familyshield
+      POSTGRES_PASSWORD: familyshield
+      POSTGRES_DB: familyshield
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U familyshield -d familyshield"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
