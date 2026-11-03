@@ -12,3 +12,5 @@ uvicorn==0.54.0
 moss==1.21.0
 # Milestone 1 state-machine tests. The hackathon agents do not import this.
 pytest==9.2.0
+# Milestone 2 check codes (backend/codes.py). The hackathon agents do not import this.
+argon2-cffi==25.1.0
