@@ -53,7 +53,7 @@ The coordination is already a single function's worth of rules inside the Guardi
 
 | Piece | File | Why it survives |
 | --- | --- | --- |
-| Digit folding, the idea of three call outcomes (`retry`, `ask`, `recorded`), bearer compare, "log the exception type, never the digits" | `services/code_webhook.py` | The product call is Twilio, so the HTTP body is TwiML instead of a word for an LLM. The outcomes mean the same thing: try the code again, ask 1 or 2, or hang up. `_digits` still folds non-ASCII digits. |
+| Digit folding, bearer compare, "log the exception type, never the digits" | `services/code_webhook.py` | The product call is Twilio, so the HTTP body is TwiML. `_digits` still folds non-ASCII digits. The hackathon one-retry-then-hang-up behavior is not copied: a wrong code on the product call hangs up immediately. |
 | Batch STT and one-shot TTS | `services/cartesia_tools.py` `transcribe`, `make_voice_message` | Claude does not transcribe or speak. `transcribe` already takes a `language` argument (the demo passes `en`; the docstring mentions `hi`). Pass `ko` for Korean notes. `make_voice_message` renders the fixed English and Korean prompt files once; the live call plays those files. |
 | Claims prompt | `services/claude_tools.py` `CLAIMS_SYSTEM`, `read_transcript` | Still the right job for Claude: structured claims, small JSON, fallback to empty fields when the API fails. |
 | Result vocabulary | `shared/messages.py` `CodeResult.result`: `sent`, `not_sent`, `wrong`, `no_answer` | The database uses these strings. The uAgents `Model` base class goes away. |
@@ -174,11 +174,15 @@ cases
   state           see state machine
   result          null | 'sent' | 'not_sent' | 'wrong' | 'no_answer'
                   | 'no_number' | 'call_failed' | 'timeout' | 'unreachable'
+                  | 'code_locked'
   parent_text     text the parent typed (may be empty if they only shared audio)
   transcript      null
   claims          jsonb null            -- claimed_identity, amount, story, red_flags
   pattern_id      null                  -- from the catalog, or null
-  code_misses     int default 0         -- wrong codes on the call; the second one ends the case
+  code_channel    null | 'one_time' | 'static'  -- which code the live call is asking for
+  one_time_code_hash null               -- HMAC of this case's 6-digit code; never the code
+  one_time_code_expires_at null         -- 5 minutes after generation
+  one_time_code_used_at null
   deadline_at     null                  -- when the current wait (push, code, or answer) expires
   audio_deleted_at null
   created_at, updated_at, decided_at
@@ -193,6 +197,7 @@ verification_attempts
 
 case_events
   id, case_id, at, step                 -- the timeline, no digits, no transcript
+  -- step static_code_mismatch is what the 24-hour lock counts; it stores no digits
 
 family_events
   id, family_id, at, actor_user_id null, step
@@ -203,7 +208,7 @@ phone_otp
   id, phone_e164, code_hash, expires_at, attempts, consumed_at
 ```
 
-Do not store keypad digits, check codes, call recordings, or Cartesia transcripts. `verification_attempts.provider_ref` is an id, not audio.
+Do not store keypad digits, the static check code, the one-time code, call recordings, or Cartesia transcripts. The one-time code's plaintext is held in process memory for at most 5 minutes and is never a column. `verification_attempts.provider_ref` is an id, not audio. `GET /v1/cases/{id}` returns neither code.
 
 `cases.result` uses today's `CodeResult.result` values plus the Guardian branches that never became a `CodeResult` (`no_number`, `call_failed`, `timeout`). The color is a function of `result`, not a second source of truth:
 
@@ -235,18 +240,18 @@ Linking is two-sided. Either side can be a scammer, so neither side's claim is e
 3. The parent sends that secret over a channel they already trust (a Kakao chat they have used before, iMessage, in person). The backend does not message the child at this step.
 4. The child installs the app on iOS or Android, signs in, and enters the secret.
 5. The child enters their mobile number. v1 accepts `+1` and `+82` only; anything else returns `unsupported_country` and stores nothing. The API sends a 6-digit SMS OTP and stores only a hash. The child submits the OTP. `phone_e164` is set only after that succeeds.
-6. The child chooses a 4-digit check code and enters it twice. The API stores salt + argon2id hash and does not return the code. This happens over TLS, once.
+6. The child chooses a 4-digit check code and enters it twice. The API stores the salt and the argon2id hash and does not return the code. The parent is never shown it. This happens over TLS, once. If the child forgets it, they set a new one in the app after a biometric check. That replaces the hash and clears the guessing lock described below.
 7. The parent's app shows "{name} wants to join. Number ending {last4}." The parent confirms or rejects. `confirmed_by_parent_at` is set only on confirm. Until then `status` stays `invited` and the member is not a legal target for a case. Reject sets `status` to `removed`.
 8. On confirm, `status` becomes `active`. The member is callable only when `status` is `active`, `confirmed_by_parent_at` is set, and `phone_opted_in_at` is set. A push token alone is enough to *ask* the child; it is not enough to place a call.
 
 The last-4 step is what stops a stolen invite: the attacker can enroll their own SIM, and the parent sees a number they do not recognize. The OTP step is what stops a parent (or a scammer using a parent's phone) from typing a stranger's number and having us call it.
 
-A child who will not install the app is milestone 13. Do not block the first end-to-end test on it. The columns above already cover it:
+A child who will not install the app is milestone 16. Do not block the first end-to-end test on it. The columns above already cover it:
 
-- Parent enters an E.164 number they already had saved, and the check code they agreed on outside the app. That submission sets `confirmed_by_parent_at` (they typed a number they claim to know) and does not set `phone_opted_in_at`.
-- The API texts that number a link. The link opens a mobile web page with one button, Allow.
+- The parent enters an E.164 number they already had saved. That submission sets `confirmed_by_parent_at` and does not set `phone_opted_in_at`. The parent does not enter a check code.
+- The API texts that number a link. The link opens a mobile web page. The child taps Allow and chooses the 4-digit check code on that page. The code is posted once over TLS, stored as a hash, and not shown to the parent.
 - `phone_opted_in_at` is set only when that page is submitted with the link secret. The parent typing the number is not opt-in.
-- No push token. Cases go straight to the call, and only after both timestamps are set.
+- No push token and no `user_id`. Cases go straight to the call, and the call asks for this static code. A forgotten code is reset the same way: a new link by SMS, and the child sets the new code on the page.
 
 ### Number changes
 
@@ -298,11 +303,17 @@ The last three are terminal. They correspond to Guardian `CONFIRMED`, `SCAM`, an
 
 ### Events
 
-`start`, `push_answered_yes`, `push_answered_no`, `push_failed`, `push_window_elapsed`, `call_accepted`, `call_failed`, `code_accepted`, `code_rejected`, `code_check_slow`, `answer_yes`, `answer_no`, `answer_unclear`, `answer_window_elapsed`, `code_window_elapsed`, `cancel`.
+`start`, `push_answered_yes`, `push_answered_no`, `push_failed`, `push_window_elapsed`, `call_accepted`, `call_failed`, `code_accepted`, `code_rejected`, `use_static_code`, `code_check_slow`, `answer_yes`, `answer_no`, `answer_unclear`, `answer_window_elapsed`, `code_window_elapsed`, `cancel`.
 
 `push_answered_yes` and `push_answered_no` are legal in `waiting_push`, `calling`, and `awaiting_answer`. The first one to reach a terminal state wins, including when the child answers in the app after already entering the right code. `push_failed` (APNs or FCM returns a permanent failure) moves `waiting_push` to `calling` when the phone is opted in, and to `not_confirmed` / `unreachable` when it is not. `cancel` moves any non-terminal state to `not_confirmed` / `timeout`.
 
-`code_check_slow` is today's `asyncio.TimeoutError` branch in `on_code`: the hash check did not finish within 4 seconds, so the call says "try the code again" and `code_misses` does not move. It is legal only in `calling`. With argon2id and a primary-key lookup this should be rare. Keep the branch so a slow database cannot burn the child's only retry.
+Entering `calling` sets `code_channel`. An app-linked child (`user_id` set) gets `one_time`: the server generates a 6-digit code for this case only. A child with no `user_id` gets `static`. If that static code is locked and there is no app, `start` or the push timeout ends the case as `not_confirmed` / `code_locked` and does not dial.
+
+`code_rejected` is one wrong submission. It moves `calling` straight to `not_confirmed` / `wrong` and the call hangs up. There is no second guess on the same call. The hackathon verifier's "retry once" branch in `on_code` is not the product rule.
+
+`use_static_code` is the star key during a one-time gather. It stays in `calling` and sets `code_channel` to `static`, unless the static code is locked, in which case the case becomes `not_confirmed` / `code_locked`. Star is not a wrong attempt. It is legal once; a second star changes nothing.
+
+`code_check_slow` is today's `asyncio.TimeoutError` branch in `on_code`: the hash check did not finish within 4 seconds. The first one stays in `calling` and replays the same gather, and it does not count as a wrong code. A second one ends the case as `not_confirmed` / `timeout`. This is a slow server, not a wrong guess. The child's only guess is still available after the first replay.
 
 ### Transitions
 
@@ -319,7 +330,8 @@ stateDiagram-v2
     calling --> confirmed: push yes arrives before a call answer
     calling --> scam: push no arrives before a call answer
     calling --> awaiting_answer: right code
-    calling --> not_confirmed: second wrong code, call failed, or 180s
+    calling --> calling: star, switch to the static code
+    calling --> not_confirmed: one wrong code, code locked, call failed, or 180s
     awaiting_answer --> confirmed: keypad yes, or push yes
     awaiting_answer --> scam: keypad no, or push no
     awaiting_answer --> not_confirmed: unclear, 45s, or cancel
@@ -340,24 +352,43 @@ Timers, taken from the current constants unless noted:
 
 `call_accepted` means Twilio returned a `CallSid`. Same meaning as `deliver_voice_message` returning `True`: the provider accepted the call, not that a person picked up. A `no-answer` or `busy` status sets result `timeout` immediately. A `failed` status sets `call_failed`. Both are yellow. Nobody answering is not a no. That is the mock-judging fix, and the regression test stays. The status callback is applied only when `CallSid` matches `verification_attempts.provider_ref`.
 
-First wrong code increments `misses` and stays in `calling`. Second wrong code sets result `wrong` and `not_confirmed`. Same as `on_code`.
+One wrong code sets result `wrong` and `not_confirmed` and hangs up. This is a deliberate change from `on_code`, which allows one retry.
+
+### Which code the call asks for
+
+| Child | What the call asks | Why |
+| --- | --- | --- |
+| App linked (`user_id` set), including when they missed the push or have no push token | The 6-digit one-time code for this case | They can open the app and read it. |
+| No app (`user_id` null) | The 4-digit static check code | There is nowhere to show a one-time code. |
+| App linked, but they press star before submitting six digits | The static check code, on the same call | They have the app and cannot look at the screen. A wrong six-digit submission hangs up; it does not then offer the check code. |
+
+The one-time code is generated only when the case enters `calling` for an app-linked child. Answering the push inside 90 seconds places no call and generates no code. The code is 6 digits from `secrets`, valid for 5 minutes, single use, and checked with HMAC-SHA256 and `CODE_PEPPER` (`hmac.compare_digest`). Postgres stores the hash, `one_time_code_expires_at`, and `one_time_code_used_at`. The plaintext sits in process memory, keyed by case id, and is wiped on use, on expiry, and on process restart. It is not an SMS, not a column, and not in the push payload.
+
+The child reads it from `GET /v1/cases/{id}/call-code` with their session. The app calls that only after Face ID or BiometricPrompt and shows the digits on the next screen. A parent session gets 403. If the process restarted and the plaintext is gone, the response is `{ "code": null, "fallback": "static" }` and the screen says to press star and enter the check code. A restart does not invent a new code; the hash in Postgres would no longer match.
+
+A match sets `one_time_code_used_at` and wipes the plaintext. A second submission of the same code is `code_rejected`. An expired code is the same outcome on the call (hang up, yellow). The timeline step distinguishes "one-time code expired" from "code did not match". The parent-facing sentence is the same yellow wrong-code sentence either way.
+
+SMS OTP is only the proof that a handset controls a number, at signup and at number change. It is never accepted as the code on a verification call, and the one-time call code is never texted.
 
 ### What the call plays
 
-The decision function still returns the three words from `services/code_webhook.py`: `retry`, `ask`, and `recorded`. Twilio never hears those words. `calls.py` maps each word to TwiML that `<Play>`s a fixed mp3 and either gathers digits or hangs up. `<Gather>` sets `input="dtmf"` only, so Twilio's speech recognizer is not on the call. A spoken "no" or "not sure" cannot become a verdict.
+`calls.py` maps each outcome to TwiML that `<Play>`s a fixed mp3 and either gathers digits or hangs up. `<Gather>` sets `input="dtmf"` only. The one-time gather also sets `finishOnKey="*"` and `numDigits="6"`. The static gather is `numDigits="4"` with no finish key. A spoken "no" cannot become a verdict.
 
-| Situation | Internal reply | TwiML | Case |
-| --- | --- | --- | --- |
-| Unknown case, or already terminal | `recorded` | play `thanks`, `<Hangup>` | unchanged |
-| 4 digits, right code | `ask` | play `question`, `<Gather numDigits="1">` | `awaiting_answer` |
-| 4 digits, first wrong code | `retry` | play `code_retry`, `<Gather numDigits="4">` | stay in `calling`, `code_misses = 1` |
-| 4 digits, second wrong code | `recorded` | play `thanks`, `<Hangup>` | `not_confirmed` / `wrong` |
-| Hash check did not finish in 4s | `retry` | play `code_retry`, gather again | unchanged, miss not counted |
-| 1 digit posted before a right code | `retry` | back to the 4-digit gather | unchanged |
-| Digit `1` after a right code | `recorded` | play `thanks`, `<Hangup>` | `confirmed` / `sent` |
-| Digit `2` after a right code | `recorded` | play `thanks`, `<Hangup>` | `scam` / `not_sent` |
-| Any other digit, or an empty gather, after a right code | `recorded` | play `thanks`, `<Hangup>` | `not_confirmed` / `no_answer` |
-| Handler exception | none | `<Hangup>` with no new verdict | unchanged, so the timer ends the case yellow |
+| Situation | TwiML | Case |
+| --- | --- | --- |
+| Unknown case, or already terminal | `<Hangup>` | unchanged |
+| One-time gather, digits are `*` or empty because of star | play `static_switch`, `<Gather numDigits="4">` | stay in `calling`, `code_channel = static` |
+| One-time gather, 6 digits, right code, unused, unexpired | play `question`, `<Gather numDigits="1">` | `awaiting_answer` |
+| Static gather, 4 digits, right code, and the static code is not locked | play `question`, `<Gather numDigits="1">` | `awaiting_answer` |
+| Either gather, wrong digits, or a used or expired one-time code | play `code_failed`, `<Hangup>` | `not_confirmed` / `wrong` |
+| Star while the static code is locked | play `code_failed`, `<Hangup>` | `not_confirmed` / `code_locked` |
+| Hash check did not finish in 4s, first time | replay the same gather | unchanged, not a wrong guess |
+| Hash check did not finish in 4s, second time | `<Hangup>` | `not_confirmed` / `timeout` |
+| 1 digit posted before a right code | replay the current code gather | unchanged |
+| Digit `1` after a right code | play `thanks`, `<Hangup>` | `confirmed` / `sent` |
+| Digit `2` after a right code | play `thanks`, `<Hangup>` | `scam` / `not_sent` |
+| Any other digit, or an empty gather, after a right code | play `thanks`, `<Hangup>` | `not_confirmed` / `no_answer` |
+| Handler exception | `<Hangup>` with no new verdict | unchanged, so the timer ends the case yellow |
 
 The product answer step accepts only `1` and `2`. It does not use `_yes_no`'s spoken synonyms (`yes`, `yeah`, `nope`). Those stay in `code_webhook.py` for the hackathon agent. An empty gather is yellow, never a no. There is no second try after an unclear digit: the first one ends the call as `no_answer`. A second try would also stay yellow, and it is a second prompt we do not need.
 
@@ -373,20 +404,22 @@ The first terminal event wins. If the child answers the push while the phone is 
 
 ### What the child is asked
 
-The call plays one of two fixed recordings, chosen from the dialed number:
+Language is chosen from the dialed number, for every clip on that call:
 
 - `+1` plays English.
 - `+82` plays Korean.
-- The member's locale, the parent's locale, and the transcript language do not change this. A student with a US number hears English on the fallback call even if their phone is set to Korean. The in-app question follows the device language.
+- The device locale and the transcript language do not change this. A student with a US number hears English on the fallback call even if their phone is set to Korean. The in-app question follows the device language.
 
 The recordings are generated once with `make_voice_message` (`sonic-3.6`, Whitney for English and a Korean Sonic voice for Korean) and checked in under `backend/prompts/en/` and `backend/prompts/ko/`. The live call does not call Cartesia.
 
-| File | English | Korean |
-| --- | --- | --- |
-| `greeting.mp3` | "Hi, this is Family Shield, an AI assistant calling for your family. They just got a message that says it's from you, and they want to make sure you're okay. Please enter your four-digit check code on your phone's keypad now." | "안녕하세요. 패밀리 쉴드입니다. 가족을 대신해 전화하는 인공지능입니다. 가족에게 회원님인 척한 메시지가 와서, 맞는지 확인하려고 전화했습니다. 키패드로 네 자리 확인 번호를 입력해 주세요." |
-| `code_retry.mp3` | "That didn't go through. Please enter your check code again." | "확인되지 않았습니다. 확인 번호를 다시 입력해 주세요." |
-| `question.mp3` | "Thank you. Did you send your family a message asking for money? Press 1 for yes, or 2 for no." | "감사합니다. 가족에게 돈을 부탁하는 메시지를 보낸 적이 있나요? 맞으면 1, 아니면 2를 누르세요." |
-| `thanks.mp3` | "Thanks, I'll let your family know." | "감사합니다. 가족에게 전달하겠습니다." |
+| File | When | English | Korean |
+| --- | --- | --- | --- |
+| `one_time_greeting.mp3` | App-linked child | "Hi, this is Family Shield, an AI assistant calling for your family. They got a message that says it's from you. Open the Family Shield app, confirm it's you, and enter the six-digit code on your keypad. If you can't open the app, press star." | "안녕하세요. 패밀리 쉴드입니다. 가족을 대신해 전화하는 인공지능입니다. 앱을 열고 본인 확인을 한 다음, 화면에 나온 여섯 자리 번호를 키패드로 입력해 주세요. 앱을 열 수 없으면 별표를 누르세요." |
+| `static_greeting.mp3` | No app | "Hi, this is Family Shield, an AI assistant calling for your family. They just got a message that says it's from you, and they want to make sure you're okay. Please enter your four-digit check code on your phone's keypad now." | "안녕하세요. 패밀리 쉴드입니다. 가족을 대신해 전화하는 인공지능입니다. 가족에게 회원님인 척한 메시지가 와서, 맞는지 확인하려고 전화했습니다. 키패드로 네 자리 확인 번호를 입력해 주세요." |
+| `static_switch.mp3` | After star | "Enter your four-digit check code." | "네 자리 확인 번호를 입력해 주세요." |
+| `code_failed.mp3` | Wrong code, or static code locked | "We couldn't verify that. Goodbye." | "확인하지 못했습니다. 전화를 종료합니다." |
+| `question.mp3` | Right code | "Thank you. Did you send your family a message asking for money? Press 1 for yes, or 2 for no." | "감사합니다. 가족에게 돈을 부탁하는 메시지를 보낸 적이 있나요? 맞으면 1, 아니면 2를 누르세요." |
+| `thanks.mp3` | After 1 or 2, or an unclear digit | "Thanks, I'll let your family know." | "감사합니다. 가족에게 전달하겠습니다." |
 
 The English lines are today's `OUTREACH_SCRIPT` plus the sentences `INSTRUCTIONS` already tells the agent to say. The greeting includes the AI disclosure.
 
@@ -451,7 +484,7 @@ Claude does not transcribe and does not dial. The owner closed the telephony cho
 1. If the child has a push token, send the push and wait 90 seconds for a biometric yes or no in the app.
 2. If they answer, the case ends and no call is placed.
 3. If the window expires, the push fails permanently, or the child has no token, and the phone is opted in, place one Twilio call to `family_members.phone_e164`.
-4. The call plays the prerecorded greeting for that number's country, gathers the 4-digit code, then gathers 1 or 2.
+4. The call plays the prerecorded greeting for that number's country. An app-linked child is asked for this case's 6-digit code (star switches to the 4-digit check code). A child with no app is asked for the 4-digit check code. A right code is followed by 1 or 2. One wrong code hangs up.
 
 Push is the path we expect when the child installed the app. The result reaches a parent in Korea as an FCM or APNs notification over the internet. The parent is not called.
 
@@ -485,7 +518,7 @@ Voice notes use `transcribe()` with `ink-whisper`. Cartesia's docs list `ko` amo
 
 On-device speech (Apple Speech in the Share Extension, Android `SpeechRecognizer`) is a later privacy optimization. Extension and share-intent time limits, plus uneven Korean models, mean a failed on-device pass still needs the server. v1 does not do it. A second cloud STT vendor is a second processor for a job `transcribe()` already does.
 
-Text-to-speech at verification-call time is not a feature. The verification call plays the eight checked-in files (four lines, two languages). The only `<Say>` in the system is the M5 fallback that speaks a six-digit OTP when Korean SMS is blocked, and that call does not touch a case.
+Text-to-speech at verification-call time is not a feature. The verification call plays the twelve checked-in files (six lines, two languages). The only `<Say>` in the system is the M5 fallback that speaks a six-digit SMS OTP when Korean SMS is blocked. That call proves number ownership. It is not a verification call, and those spoken digits are not the one-time code the fallback call asks for.
 
 ### What we will not build
 
@@ -513,8 +546,10 @@ A voice note enters through the iOS Share Extension or the Android `ACTION_SEND`
 
 | Secret | Handling |
 | --- | --- |
-| Check code | Leave the device once, over TLS, on set or on a webhook. `backend/codes.py` stores an argon2id PHC string of `pepper + code` with the per-member salt. Pepper is `CODE_PEPPER`, required at startup, not in the database. Verification uses argon2-cffi's verify, which is constant-time, and treats a mismatch as wrong. One retry on the call, then yellow. Online guessing against `/tools/verify_code` is capped by that retry and by the case ending. |
-| Invite secret, session token, SMS OTP | Random, stored only as a hash, single use or revocable, expiry as above. |
+| Static check code | The child sets it. The parent never sees it, including for a child with no app (they type it on the allow page themselves). `backend/codes.py` stores an argon2id PHC string of `pepper + code` with the per-member salt. Pepper is `CODE_PEPPER`, required at startup, not in the database. Verification uses argon2-cffi's verify, which is constant-time. One wrong submission ends the call. Five static mismatches for that child in 24 hours lock the code until the child sets a new one. The lock counts mismatches after `code_set_at` only. |
+| One-time call code | 6 digits, generated by the server when an app-linked case enters `calling`. HMAC-SHA256 with `CODE_PEPPER`, compared with `hmac.compare_digest`. Single use, 5 minutes, one guess. Plaintext exists only in process memory. The app shows it only after biometric unlock. It is not sent by SMS and not sent to the parent. |
+| SMS OTP | Proves control of a phone number at signup and at number change. Six digits, hashed, five tries, then the challenge dies. It is not accepted on the verification call, and the call's one-time code is a different value. |
+| Invite secret, session token | Random, stored only as a hash, single use or revocable, expiry as above. |
 | `CODE_WEBHOOK_SECRET` | Existing bearer check for the hackathon Cartesia webhook, `hmac.compare_digest` over the whole header (`_check_auth`). Required only while that agent is still running. |
 | Twilio auth token | Validates `X-Twilio-Signature` on `/voice/twilio/*`. Required in the product boot path. |
 | Provider keys | Environment only. `cartesia_setup.py` already redacts the webhook secret from error text. Keep that habit for Twilio errors: do not log the auth token or `Digits`. |
@@ -531,7 +566,9 @@ Fail closed when `CODE_PEPPER`, `CODE_WEBHOOK_SECRET`, or `DATABASE_URL` is miss
 
 **Scammer registers many families to run up call charges or to harass.** Sign in with Apple or Google limits how cheap a new account is. International minutes to `+82` make the cap more important than it was for US-only calls. A parent may open at most 5 cases per child per rolling 24 hours, and at most 10 case opens per parent per rolling 24 hours. A call attempt counts even if nobody answers. Over the limit, the case is refused with `rate_limited` and nothing is dialed. Numbers are tunable; the existence of a cap is not.
 
-**Stolen child phone.** Push answers need a biometric or the device passcode. A call answer needs the check code, which is not stored on the phone in plaintext (the app does not keep it after submission). Changing the phone number needs the parent. Until the parent confirms, calls still go to the old number.
+**Stolen child phone.** Push answers need a biometric or the device passcode. The one-time code is shown only after that same check, and it is not on the lock screen. The static check code is not stored on the phone after it is set. Changing the phone number needs the parent. Until the parent confirms, calls still go to the old number.
+
+**Guessing a code.** A wrong code ends that call. The caller can tell it was wrong, because the call continues to the yes/no question only after a right code. That leak is accepted. What stops a search of the 4-digit space is the cap: five static mismatches in 24 hours lock the code, and a parent can open at most five cases per child in that same window. A locked static code does not disable the push answer or a later case's one-time code. One-time guesses are one per case against a 6-digit value that dies in five minutes. Resetting the static code requires the child's biometric in the app, or the SMS allow page opened from their number. The parent cannot reset it.
 
 **Parent account takeover.** Sign in with Apple or Google. Confirming a child, approving a number change, and opening a case all require that parent's live session. Both parents see member changes in the family event list ("number change requested", "number change confirmed"). No extra product surface.
 
@@ -550,7 +587,7 @@ Fail closed when `CODE_PEPPER`, `CODE_WEBHOOK_SECRET`, or `DATABASE_URL` is miss
 - Logs follow `code_webhook.py`: case id, outcome, digit length, exception type. Not the digits, not the transcript, not the parent's free text.
 - Twilio calls are created with recording off. We do not store the call audio. `--recent-calls` remains a manual debugging command for the hackathon Cartesia agent only.
 - The sign-up notice names who processes what: Cartesia transcribes the voice note (the prompt mp3s were rendered from our own scripts), Twilio carries the call and the OTP, Anthropic sees the transcript text, and Apple or Google handles sign-in and push. We do not build a voiceprint.
-- The push payload, APNs or FCM, is the generic sentence plus a case id.
+- The push payload, APNs or FCM, is the generic sentence plus a case id. It does not contain either code.
 - Postgres disk encryption is the host's default (turn it on where the host asks). Application-level encryption of the transcript is not in v1; the 30-day delete and the access checks are the controls.
 - Children are college students. v1 does not enroll anyone who says they are under 13, and the sign-up copy says the child account is for the student, not for a younger sibling. A real age gate is an open question if the owner wants younger families.
 
@@ -562,7 +599,8 @@ Ship these English strings, and Korean translations of the same meaning, as a st
 - Green, when a pattern id is set: "This message looked like a known pattern ({label}), but {name} confirmed they sent it. Avoid gift cards, crypto, and wire transfers; they are hard to reverse."
 - Red: "{name} confirmed they did not send this. Do not send money and do not reply to whoever contacted you."
 - Yellow, no number: "There is no verified number for {name}, so no call was made. Don't send money. Call your child on the number you already know."
-- Yellow, call failed or timeout or wrong code or no answer: the matching paragraph already in Guardian `finish` (`on_code_result`, `on_reached`, `check_timeouts`).
+- Yellow, call failed or timeout or wrong code or no answer: the matching paragraph already in Guardian `finish` (`on_code_result`, `on_reached`, `check_timeouts`). A wrong code is yellow, never red.
+- Yellow, code locked: "We couldn't check {name}'s code. Don't send money. They can set a new check code in the app."
 
 ## Phased plan
 
@@ -574,23 +612,29 @@ The first four milestones are the backend extraction. They can be tested with `p
 
 Create `backend/verify.py` and `tests/test_verify.py`.
 
-`apply(case, event) -> case` implements the transitions. `case` is a plain dict with `state`, `result`, `code_misses`, `has_push_token`, and `has_opted_in_phone`. No database and no HTTP yet. The signature matches the one the later store calls.
+`apply(case, event) -> case` implements the transitions. `case` is a plain dict with `state`, `result`, `code_channel`, `has_app`, `has_push_token`, `has_opted_in_phone`, `static_locked`, and `slow_checks`. No database and no HTTP yet. The signature matches the one the later store calls.
 
-Tests, named after behavior that already shipped:
+Tests:
 
 - unanswered path: `call_accepted` then `code_window_elapsed` yields `not_confirmed` / `timeout`, never `not_sent`
-- first wrong code stays non-terminal; second yields `wrong`
+- one `code_rejected` yields `not_confirmed` / `wrong` immediately (the hackathon second chance is not this machine)
+- `use_static_code` on a one-time channel stays in `calling` with `code_channel = static`
+- `use_static_code` when `static_locked` yields `code_locked` and does not look at a code
+- entering `calling` with `has_app` sets `code_channel` to `one_time`; without `has_app` it sets `static`
 - `answer_no` before `code_accepted` does not change the result
 - `answer_unclear` yields `no_answer`, not `not_sent`
 - `answer_yes` yields `confirmed` / `sent`; a later `answer_no` is ignored
 - push yes during `calling` decides the case; a following `code_rejected` is ignored
 - `start` with no push token and no phone yields `no_number`
+- `start` with no app and `static_locked` yields `code_locked` and does not call
 
 ### M2. Check codes
 
 Create `backend/codes.py` and `tests/test_codes.py`.
 
-`hash_code(code, salt) -> str` and `verify_code(code, salt, stored) -> bool`. Pepper is read from the environment inside `hash_code` and `verify_code`. `verify_code` calls argon2-cffi's verify and returns `False` on a mismatch. Wrong length, empty string, and a missing pepper (raise, and the test sets the env) are covered. A test vector pins that two salts of the same code do not verify against each other. The bearer-token compare in `services/code_webhook.py` stays `hmac.compare_digest`; this module does not replace that.
+`hash_code(code, salt) -> str` and `verify_code(code, salt, stored) -> bool` for the 4-digit static code. Pepper is read from the environment inside both. `verify_code` calls argon2-cffi's verify and returns `False` on a mismatch. Wrong length, empty string, and a missing pepper (raise, and the test sets the env) are covered. A test vector pins that two salts of the same code do not verify against each other.
+
+`hash_one_time(code) -> str` and `verify_one_time(code, stored) -> bool` for the 6-digit code. HMAC-SHA256 with the same pepper, compared with `hmac.compare_digest`. Tests cover a match, a mismatch, and a wrong length. Expiry and single-use are columns on the case, checked by the caller, not by this function. The bearer-token compare in `services/code_webhook.py` stays `hmac.compare_digest`; this module does not replace that.
 
 This replaces `services/data_tools.py` `hash_code` for new data. Do not "migrate" the demo hash of `2580`; there are no production members.
 
@@ -598,13 +642,13 @@ This replaces `services/data_tools.py` `hash_code` for new data. Do not "migrate
 
 Create `backend/schema.sql`, `backend/store.py`, and `tests/test_store.py`.
 
-Tables are the data model above, including `family_events`, `code_misses`, `deadline_at`, and `pending_phone_e164`. The store functions load a case `FOR UPDATE`, copy `has_push_token` and `has_opted_in_phone` from the member row, call `apply`, set `deadline_at` from the state just entered (90s, 180s, or 45s), and insert the `case_events` row in the same transaction. Tests run against Postgres started with a `docker-compose.yml` added in this PR. If that Postgres is not up, pytest skips with a message that includes the compose command. This repo has no CI yet; the compose file is the test setup. A comment at the top of `schema.sql` repeats the command. Do not add a second SQLite schema.
+Tables are the data model above, including `family_events`, `code_channel`, the one-time hash columns, `deadline_at`, and `pending_phone_e164`. There is no `code_misses` column and no plaintext code column. The store functions load a case `FOR UPDATE`, copy `has_app` (`user_id` is set), `has_push_token`, `has_opted_in_phone`, and `static_locked` (five static mismatches since `code_set_at` in the last 24 hours) from the member, call `apply`, set `deadline_at` from the state just entered (90s, 180s, or 45s), and insert the `case_events` row in the same transaction. A static mismatch row is how the lock is counted. It stores the outcome, not the digits. Tests run against Postgres started with a `docker-compose.yml` added in this PR. If that Postgres is not up, pytest skips with a message that includes the compose command. This repo has no CI yet; the compose file is the test setup. A comment at the top of `schema.sql` repeats the command. Do not add a second SQLite schema.
 
 ### M4. API that can be tested without a handset
 
 Create `backend/api.py` and `tests/test_api.py`. Leave `services/code_webhook.py` `make_app` working for `python -m services.code_webhook` and for the Verifier agent. The product path uses `_digits` from that module and does not use `_yes_no` for the call. Copy the digit-folding tests into `tests/test_code_webhook.py` so the two cannot drift.
 
-Endpoints in this PR, all behind `DEV_AUTH`: create family, add child, mark the child active with a phone (the test helper sets `phone_opted_in_at` without SMS), set a code, open a case, get a case, post an in-app answer, and post digits to the decision function the Twilio routes will wrap in M6. A fake call provider records "would call {e164}" and does not open a socket. The test walks: open case → push not configured → fake call accepted → digits `2580` (or whatever the test set) → digit `1` → GET shows confirmed. A second test posts in-app `answer: "no"` and checks that a following digit `1` cannot flip it to confirmed. A third test posts digit `5` after a right code and expects yellow `no_answer`. A fourth test posts digit `1` before any code and expects the case to stay non-terminal.
+Endpoints in this PR, all behind `DEV_AUTH`: create family, add child, mark the child active with a phone (the test helper sets `phone_opted_in_at` without SMS), set a code, open a case, get a case, post an in-app answer, and post digits to the decision function the Twilio routes will wrap in M6. A fake call provider records "would call {e164}" and does not open a socket. The test walks a call-only child (no `user_id`): open case → fake call accepted on the static channel → the digits the test set as the check code → digit `1` → GET shows confirmed. A second test posts in-app `answer: "no"` on an app-linked child and checks that a following code cannot flip it to confirmed. A third test posts digit `5` after a right code and expects yellow `no_answer`. A fourth test posts one wrong static code and expects yellow `wrong` with no further gather. A fifth test posts digit `1` before any code and expects the case to stay non-terminal. A parent GET of the case body contains no code.
 
 Enrollment of a number that is neither `+1` nor `+82` returns `unsupported_country`. A test covers `+44`.
 
@@ -620,11 +664,13 @@ One manual SMS to a `+82` phone the owner controls. If the carrier blocks it, th
 
 ### M6. Twilio keypad fallback, +1 and +82
 
-`backend/calls.py` places the Twilio call and maps `retry` / `ask` / `recorded` to TwiML. `call_language("+821012345678")` is `ko`. `call_language("+14155550123")` is `en`. Tests monkeypatch the Twilio client, assert the `<Play>` URL matches the language, assert `<Gather input="dtmf">` and the right `numDigits`, and assert a missing or bad `X-Twilio-Signature` is 403. A `no-answer` status callback yields yellow `timeout`, never `not_sent`. Recording is off.
+`backend/calls.py` places the Twilio call and maps outcomes to TwiML. `call_language("+821012345678")` is `ko`. `call_language("+14155550123")` is `en`. Tests monkeypatch the Twilio client. An app-linked child gets `one_time_greeting` and `<Gather input="dtmf" numDigits="6" finishOnKey="*">`. Star (`Digits` empty) returns `static_switch` and `numDigits="4"`. A child with no `user_id` gets `static_greeting` and `numDigits="4"`. A wrong code returns `code_failed` and `<Hangup>`, and the case is `wrong`. A missing or bad `X-Twilio-Signature` is 403. A `no-answer` status callback yields yellow `timeout`, never `not_sent`. Recording is off.
 
-Check in the eight mp3 files, produced by a small script that calls `make_voice_message` once per line. Tests do not call Cartesia; they assert the files exist and the TwiML points at them. Do not import `deliver_voice_message`.
+`GET /v1/cases/{id}/call-code` returns the plaintext to the child session while the in-memory copy is alive, and 403 to the parent. A test wipes the memory and expects `{ "code": null, "fallback": "static" }`.
 
-Manual check on a `+1` number and a `+82` number the owner controls: right code then 1, wrong code then right code then 2, hang up without answering (yellow). The PR can merge on the automated tests with those two calls checked off in the PR body. Add a short pointer in `services/CARTESIA.md` that the product call is Twilio and Cartesia's job is STT plus these files. Leave the hackathon agent setup as it is.
+Check in the twelve mp3 files, produced by a small script that calls `make_voice_message` once per line. Tests do not call Cartesia; they assert the files exist and the TwiML points at them. Do not import `deliver_voice_message`. Add a short pointer in `services/CARTESIA.md` that the product call is Twilio and Cartesia's job is STT plus these files. Leave the hackathon agent setup as it is.
+
+Manual checks, on a `+1` number and a `+82` number: app path with the 6-digit code then 1; star then the 4-digit code then 2; one wrong code hangs up and the case is yellow; hang up with no digits stays yellow. The PR can merge on the automated tests with those calls checked off in the PR body.
 
 ### M7. Voice note in, claims out
 
@@ -636,7 +682,7 @@ Add `backend/patterns.json` and the picker. Do not import `services/scam_intel.p
 
 ### M8. Push
 
-`backend/push.py` sends a generic alert through APNs or FCM based on `push_provider`. Tests use a fake sender that records the payload and asserts it has no amount and no transcript. On `start`, if a token exists, state becomes `waiting_push` and an attempt row is written. A test moves the clock 90 seconds and expects `calling` and exactly one fake call, to a `+1` member and, in a second test, to a `+82` member. `POST /v1/cases/{id}/answer` with yes/no behaves as in M4, now from `waiting_push` as well.
+`backend/push.py` sends a generic alert through APNs or FCM based on `push_provider`. Tests use a fake sender that records the payload and asserts it has no amount, no transcript, and neither code. On `start`, if a token exists, state becomes `waiting_push` and an attempt row is written. A test moves the clock 90 seconds and expects `calling` and exactly one fake call, to a `+1` member and, in a second test, to a `+82` member. `POST /v1/cases/{id}/answer` with yes/no behaves as in M4, now from `waiting_push` as well.
 
 Token registration accepts `apns` and `fcm`. A permanent push failure with an opted-in phone skips straight to `calling`. The same failure with no phone ends the case as `unreachable`.
 
@@ -652,7 +698,7 @@ App Group, extension accepts audio and text, main app opens a draft case with th
 
 ### M11. iOS app, child path
 
-Accept invite, enter phone, enter OTP, set code twice, register for notifications, show the pending question, run Face ID (simulator accepts the simulated biometric), post yes or no. A UI test covers "not now" dismissing the screen without posting, which must leave the case non-terminal so the backend can fall through to the call.
+Accept invite, enter phone, enter OTP, set the check code twice, register for notifications, show the pending question, run Face ID (simulator accepts the simulated biometric), post yes or no. While a case is `calling`, the same biometric gate reveals the 6-digit code; the notification does not. A UI test covers "not now" dismissing the screen without posting, which must leave the case non-terminal so the backend can fall through to the call. Resetting the check code requires the biometric again and is covered by a UI test that the old code no longer matches.
 
 ### M12. Android app, parent path
 
@@ -664,15 +710,15 @@ New `android/` Kotlin project. Google Sign-In, create family, show invite secret
 
 ### M14. Android app, child path
 
-Accept invite, enter a `+1` or `+82` phone, enter OTP, set the code twice, register an FCM token, show the pending question, run `BiometricPrompt` (the emulator can approve it), post yes or no. A UI test covers dismissing the screen without posting, which must leave the case non-terminal so the backend can fall through to the call. The notification itself has no yes/no action.
+Accept invite, enter a `+1` or `+82` phone, enter OTP, set the check code twice, register an FCM token, show the pending question, run `BiometricPrompt` (the emulator can approve it), post yes or no. The same biometric gate reveals the 6-digit code while the case is `calling`. A UI test covers dismissing the screen without posting, which must leave the case non-terminal so the backend can fall through to the call. The notification itself has no yes/no action and no code. Resetting the check code requires `BiometricPrompt` again.
 
 ### M15. Number changes, caps, and the banner
 
-Parent-confirms-new-number flow, including a change from `+1` to `+82` and the reverse (the next call uses the new prefix's language). Open cases on that member end as `timeout`. Rate limits with tests at the boundary (5th case succeeds, 6th returns `rate_limited` and the fake provider has no new call). Family-event rows. Banner when the member was confirmed less than 24 hours ago.
+Parent-confirms-new-number flow, including a change from `+1` to `+82` and the reverse (the next call uses the new prefix's language). Open cases on that member end as `timeout`. Rate limits with tests at the boundary (5th case succeeds, 6th returns `rate_limited` and the fake provider has no new call). Five static mismatches in 24 hours lock the check code; the next static attempt returns `code_locked` and does not dial. A wrong one-time code does not count toward that lock. Setting a new check code clears it. Family-event rows. Banner when the member was confirmed less than 24 hours ago.
 
 ### M16. Call-only child
 
-SMS allow-link and the mobile web confirm page, for a child who will not install either app. Works for `+1` and `+82`. The parent enters the agreed check code once at setup. Tests use `DevOtp` and a test client against the confirm page. Cases for that member go straight to the Twilio call.
+SMS allow-link and the mobile web confirm page, for a child who will not install either app. Works for `+1` and `+82`. The child opens the link, taps Allow, and sets the 4-digit check code on that page. The parent never submits it and the page does not echo it back. Tests use `DevOtp` and a test client against the confirm page, including a forgotten-code reset through a second link. Cases for that member go straight to the static-code Twilio call. The SMS OTP on this page is the number-ownership check, not the code the verification call asks for.
 
 ### M17. Label our own outbound number
 
@@ -690,13 +736,13 @@ Delete `agents/`, `shared/trust.py`, the uAgents models, Moss, Apify, the unused
 
 1. **Parents are not iPhone-only.** Decided: native apps on both platforms, parent and child roles in each. iOS is SwiftUI. Android is Kotlin. Sign-in is Apple on iOS and Google on Android, because a Korean parent on Android should not need an Apple ID. The invite is what links them.
 2. **Child numbers are not US-only.** Decided: v1 places the fallback call to `+1` and to `+82`. Other country codes are rejected at enrollment.
-3. **The fallback call does not use a voice agent.** Decided: primary is push plus a biometric answer. Fallback is Twilio `<Play>` of a prerecorded Cartesia mp3 and `<Gather input="dtmf">`. Check code first, then 1 or 2. No LLM on the call. Language comes from the number (`+82` Korean, `+1` English), not from the device locale. Cartesia remains for voice-note STT and for rendering those files. Claude remains for claims and the pattern id only.
+3. **The fallback call does not use a voice agent.** Decided: primary is push plus a biometric answer. Fallback is Twilio `<Play>` of a prerecorded Cartesia mp3 and `<Gather input="dtmf">`. The code comes first, then 1 or 2. No LLM on the call. Language comes from the number (`+82` Korean, `+1` English), not from the device locale. Cartesia remains for voice-note STT and for rendering those files. Claude remains for claims and the pattern id only.
+4. **Who knows the code.** Decided: only the child. They set the 4-digit check code in the app, or on the allow page if they have no app. The parent never sees it. It is stored as argon2id with a pepper. A forgotten code is reset by the child after a biometric check, or through a new SMS link if they have no app. One wrong code on a call hangs up immediately. Five static mismatches in 24 hours lock that code until the child resets it. When the child has the app but missed the push, the fallback call asks for a server-generated 6-digit code instead, shown in the app only after biometric unlock, one code per case, 5 minutes, single use, stored as a hash. Pressing star on that call switches to the static check code. SMS OTP only proves the number at signup and number change. It is not a code on the verification call.
 
 ### Still open
 
 These defaults are what the milestones assume. An answer changes a milestone. It does not block M1.
 
-4. **Who is allowed to know the check code?** Default: the child sets it and the parent never sees it again. Call-only children (M16) are the exception, because the parent has to enter the agreed code once.
 5. **Hard-block verification against a member added in the last 24 hours, or show the banner?** Default: banner.
 6. **Is 30 days the right transcript retention, and is a Korean parent owed a specific privacy notice (PIPA) beyond the sign-up sentence?** Default: 30 days, and a short in-app notice that names Family Shield, Cartesia, Twilio, Anthropic, and Apple or Google. A lawyer should read that notice before a public store release. The pilot can use the same text stamped "pilot".
 7. **Where does Postgres run?** Default: a host that gives a `DATABASE_URL` with encryption at rest. A Supabase Postgres project is fine. The Supabase storage API and client library are not used.
@@ -708,4 +754,4 @@ These defaults are what the milestones assume. An answer changes a milestone. It
 
 ## How this maps onto the first implementation PR
 
-M1 does not need a new dependency beyond `pytest`. It does not import `uagents`. It encodes the rules that are currently spread across `agents/verifier/agent.py` (`on_code`, `on_answer`, `_report`, the 45s timer) and `agents/guardian/agent.py` (`on_code_result`, `check_timeouts`, the "empty phone means yellow" branch). Starting there means the safety rules get a test file before any of the surrounding product exists.
+M1 does not need a new dependency beyond `pytest`. It does not import `uagents`. It encodes the rules that are currently spread across `agents/verifier/agent.py` (`on_code`, `on_answer`, `_report`, the 45s timer) and `agents/guardian/agent.py` (`on_code_result`, `check_timeouts`, the "empty phone means yellow" branch), except the hackathon's one retry on a wrong code. The product hangs up on the first wrong code. Starting there means the safety rules get a test file before any of the surrounding product exists.
