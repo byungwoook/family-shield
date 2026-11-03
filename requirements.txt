@@ -10,3 +10,5 @@ fastapi==0.162.0
 uvicorn==0.54.0
 # Moss semantic search (family directory + scam reports)
 moss==1.21.0
+# Milestone 1 state-machine tests. The hackathon agents do not import this.
+pytest==9.2.0
