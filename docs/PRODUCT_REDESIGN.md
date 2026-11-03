@@ -4,6 +4,17 @@ This document turns the Cal Hacks 13.0 demo into a product a family can keep usi
 
 The product still does one job: a parent got a message that sounds like their child and asks for money, and they need the real child's answer before they pay. The voice can be cloned. The app does not try to decide whether a voice is real.
 
+## Threat model
+
+The product is aimed at two attacks used together.
+
+1. **Voice-clone vishing.** A call or voice note sounds like the child. A few seconds of video is enough to make it. How real it sounds is not evidence.
+2. **Caller-ID spoofing.** The scam call or message presents the child's real number, so it looks like it came from the handset the parent already has saved.
+
+An incoming call, a caller-ID string, and a number written inside the message are not evidence. The product never treats them as a yes. Verification is always outbound: a push to the child's enrolled device, or a call we place to the number the family registered. We do not intercept the parent's incoming call. iOS does not give a third-party app that audio, and we would not trust it if it did.
+
+iOS Call Directory and Android `CallScreeningService` label only our own outbound number, so the child can tell Family Shield is calling. They do not label the child's number as genuine. A screen that says the incoming call is "really" the child would be the spoofing attack wearing our name.
+
 ## Decision
 
 Two native apps and one Python backend (FastAPI + Postgres). iOS is SwiftUI. Android is Kotlin. Each binary has the parent role and the child role. The parent picks a child they already linked, attaches the suspicious message, and taps Verify. The child answers in the app after a biometric check (Face ID, or Android BiometricPrompt). If they do not answer in time, or they have no app, the backend calls the phone number that child already proved they control. That call is a fixed recording plus keypad digits. Claude reads the message for the parent's information. Only the child's authenticated answer changes the result.
@@ -18,7 +29,7 @@ These are already enforced in code. A rewrite that drops one of them is a bug.
 | --- | --- |
 | Only an authenticated answer from the child turns a case green or red. Claude, the transcript, a scam-pattern label, a timeout, and silence do not. | `agents/guardian/agent.py` module docstring and `on_code_result` (the `sent` / `not_sent` branches). `services/scam_intel.py` docstring: the pattern line never decides green or red. |
 | The check comes before the yes/no question on a phone call, so a person who picks up cannot just press 1 or 2. | `agents/verifier/agent.py` `on_code` / `on_answer`: `on_answer` reports only when `code_ok` is set. |
-| Call only a number the family registered. Never a number parsed out of the suspicious message. Never a fuzzy match onto a different person. | `agents/guardian/agent.py` `on_contact`: empty phone finishes yellow and does not call. `services/data_tools.py` `_moss_lookup`: a Moss hit is kept only when the queried name is in that contact's aliases. |
+| Call only a number the family registered. Never a number parsed out of the suspicious message. Never a fuzzy match onto a different person. Never treat an inbound caller ID as that number. | `agents/guardian/agent.py` `on_contact`: empty phone finishes yellow and does not call. `services/data_tools.py` `_moss_lookup`: a Moss hit is kept only when the queried name is in that contact's aliases. |
 | Store check codes as hashes. Compare in constant time. Never read a code back on the call, and never log the digits. | `services/data_tools.py` `hash_code`, `classify_code`. `services/code_webhook.py` `_call` logs the exception type only. `services/cartesia_setup.py` `INSTRUCTIONS`: "Never read back or repeat the digits." |
 | An unclear answer is not "no". "No answer", "not sure", or silence stays yellow. | `services/code_webhook.py` `_yes_no`: anything outside the yes-set and the no-set becomes `""`. README and the mock-judging fix: an unanswered call used to count as a no and raised a false scam alert. |
 | One result per case. A late or duplicate webhook cannot flip it. | `agents/verifier/agent.py` `_report`: `reported` is set before the send, and a second call returns immediately. Guardian ignores `CodeResult` once the case is in `DONE`. |
@@ -32,7 +43,7 @@ Parent-facing results stay the three the demo already uses:
 | --- | --- |
 | Confirmed (green) | The child authenticated and said they did ask for the money. Talk to them directly before sending anything. |
 | Scam (red) | The child authenticated and said they did not ask. Do not send money and do not reply to the sender. |
-| Not confirmed (yellow) | Wrong code, no answer, no opted-in number, call not placed, or still in progress. Do not send money. |
+| Not confirmed (yellow) | Wrong code, no answer, no opted-in number, call not placed, still in progress, or a "yes" on a call to a number registered or changed in the last 24 hours. Do not send money. |
 
 ## What the hackathon system actually does
 
@@ -156,6 +167,7 @@ family_members
   status          'invited' | 'active' | 'removed'
   phone_e164      null                  -- the number we may call; set only after the handset proves it
   phone_opted_in_at null
+  phone_current_since null             -- when the current phone_e164 became the dial target (first opt-in, or a confirmed change)
   pending_phone_e164 null               -- a replacement that has passed OTP and is waiting on the parent
   pending_phone_set_at null
   push_token      null                  -- one token; the latest registration replaces the previous one
@@ -174,7 +186,8 @@ cases
   state           see state machine
   result          null | 'sent' | 'not_sent' | 'wrong' | 'no_answer'
                   | 'no_number' | 'call_failed' | 'timeout' | 'unreachable'
-                  | 'code_locked'
+                  | 'code_locked' | 'number_recent'
+  answered_via    null | 'push' | 'call'   -- which channel produced sent or not_sent
   parent_text     text the parent typed (may be empty if they only shared audio)
   transcript      null
   claims          jsonb null            -- claimed_identity, amount, story, red_flags
@@ -214,8 +227,9 @@ Do not store keypad digits, the static check code, the one-time code, call recor
 
 | `result` | Color |
 | --- | --- |
-| `sent` | confirmed |
-| `not_sent` | scam |
+| `sent`, and the channel was push, or the call was to a number in place for 24 hours or more | confirmed |
+| `sent` on a call, and `phone_current_since` is within 24 hours | not confirmed (`number_recent`) |
+| `not_sent` | scam, including when the number is new |
 | anything else non-null | not confirmed |
 | null | still open |
 
@@ -242,7 +256,7 @@ Linking is two-sided. Either side can be a scammer, so neither side's claim is e
 5. The child enters their mobile number. v1 accepts `+1` and `+82` only; anything else returns `unsupported_country` and stores nothing. The API sends a 6-digit SMS OTP and stores only a hash. The child submits the OTP. `phone_e164` is set only after that succeeds.
 6. The child chooses a 4-digit check code and enters it twice. The API stores the salt and the argon2id hash and does not return the code. The parent is never shown it. This happens over TLS, once. If the child forgets it, they set a new one in the app after a biometric check. That replaces the hash and clears the guessing lock described below.
 7. The parent's app shows "{name} wants to join. Number ending {last4}." The parent confirms or rejects. `confirmed_by_parent_at` is set only on confirm. Until then `status` stays `invited` and the member is not a legal target for a case. Reject sets `status` to `removed`.
-8. On confirm, `status` becomes `active`. The member is callable only when `status` is `active`, `confirmed_by_parent_at` is set, and `phone_opted_in_at` is set. A push token alone is enough to *ask* the child; it is not enough to place a call.
+8. On confirm, `status` becomes `active` and `phone_current_since` is set to now. The member is callable only when `status` is `active`, `confirmed_by_parent_at` is set, and `phone_opted_in_at` is set. A push token alone is enough to *ask* the child; it is not enough to place a call. For 24 hours after `phone_current_since`, a yes collected on a call to that number is yellow (`number_recent`). A yes on the enrolled device stays green. A no stays red.
 
 The last-4 step is what stops a stolen invite: the attacker can enroll their own SIM, and the parent sees a number they do not recognize. The OTP step is what stops a parent (or a scammer using a parent's phone) from typing a stranger's number and having us call it.
 
@@ -251,13 +265,15 @@ A child who will not install the app is milestone 16. Do not block the first end
 - The parent enters an E.164 number they already had saved. That submission sets `confirmed_by_parent_at` and does not set `phone_opted_in_at`. The parent does not enter a check code.
 - The API texts that number a link. The link opens a mobile web page. The child taps Allow and chooses the 4-digit check code on that page. The code is posted once over TLS, stored as a hash, and not shown to the parent.
 - `phone_opted_in_at` is set only when that page is submitted with the link secret. The parent typing the number is not opt-in.
-- No push token and no `user_id`. Cases go straight to the call, and the call asks for this static code. A forgotten code is reset the same way: a new link by SMS, and the child sets the new code on the page.
+- No push token and no `user_id`. `phone_current_since` is set when the allow page is submitted, which is when that number becomes the one we call. Cases go straight to the call, and the call asks for this static code. For the first 24 hours a yes on that call is yellow. A forgotten code is reset the same way: a new link by SMS, and the child sets the new code on the page. A reset of the code does not reset `phone_current_since`.
 
 ### Number changes
 
 A child with the app starts a change, passes the device biometric (Face ID or BiometricPrompt, with device passcode as the fallback), proves the new number with OTP, and waits. The OTP completion writes `pending_phone_e164` and leaves `phone_e164` as the dial target. A parent confirms, and one transaction copies the pending number onto `phone_e164`, clears the pending columns, and applies `cancel` to every open case for that member (state `not_confirmed`, result `timeout`, timeline step "phone number changed"). A call already in flight cannot land on a half-moved member. A webhook that arrives afterward sees a terminal case and changes nothing.
 
 The new number is not callable before the parent's confirm. A stolen unlocked phone therefore cannot quietly retarget verification at the thief.
+
+Both moments notify immediately: when the new number passes OTP (`pending_phone_e164` is set), and again when a parent confirms it. Parents get a push. The child gets a push to the current device token and an SMS to the current `phone_e164`, which is still the old number until the confirm transaction commits. v1 stores one push token, so a previous handset is reached by that SMS, not by a second token. The SMS is a notice ("the number for this family is changing; if you didn't ask, open the app and reject it"). It contains no code, and it is not the SMS OTP and not a verification factor. `phone_current_since` is set to the confirm time. For the next 24 hours, a "yes" collected on a call to that number is stored as `number_recent` (yellow). A "no" on that call stays `not_sent` (red). A "yes" from the enrolled device, over push, stays `sent` (green): that answer did not come via the new SIM.
 
 ### Push token
 
@@ -332,7 +348,9 @@ stateDiagram-v2
     calling --> awaiting_answer: right code
     calling --> calling: star, switch to the static code
     calling --> not_confirmed: one wrong code, code locked, call failed, or 180s
-    awaiting_answer --> confirmed: keypad yes, or push yes
+    awaiting_answer --> confirmed: keypad yes, number in place 24h or more
+    awaiting_answer --> not_confirmed: keypad yes, number newer than 24h
+    awaiting_answer --> confirmed: push yes, even if the number is new
     awaiting_answer --> scam: keypad no, or push no
     awaiting_answer --> not_confirmed: unclear, 45s, or cancel
     confirmed --> [*]
@@ -353,6 +371,8 @@ Timers, taken from the current constants unless noted:
 `call_accepted` means Twilio returned a `CallSid`. Same meaning as `deliver_voice_message` returning `True`: the provider accepted the call, not that a person picked up. A `no-answer` or `busy` status sets result `timeout` immediately. A `failed` status sets `call_failed`. Both are yellow. Nobody answering is not a no. That is the mock-judging fix, and the regression test stays. The status callback is applied only when `CallSid` matches `verification_attempts.provider_ref`.
 
 One wrong code sets result `wrong` and `not_confirmed` and hangs up. This is a deliberate change from `on_code`, which allows one retry.
+
+A yes on the call while `number_recent` is true does not enter `confirmed`. The state becomes `not_confirmed` and the result is `number_recent`. A no on that call still enters `scam`. A yes from the push channel still enters `confirmed`. The downgrade is applied inside `apply`, so the API never stores a green that the parent is not supposed to see.
 
 ### Which code the call asks for
 
@@ -562,7 +582,9 @@ Fail closed when `CODE_PEPPER`, `CODE_WEBHOOK_SECRET`, or `DATABASE_URL` is miss
 
 **Scammer steals an invite and enrolls their own phone.** The parent sees an unrecognized last-4 and rejects it. Invites are single-use. A rejected membership cannot be confirmed later with the same secret.
 
-**During a live scam, the message says "my new number is …" and the parent adds it.** The case target is always an existing `child_member_id`. The API never extracts a phone number from `parent_text` or the transcript. Adding a member is a different screen from Verify. A member whose `confirmed_by_parent_at` is less than 24 hours old can still be verified (families will install on the day they are scared), and the case screen shows a fixed banner: "You added this number recently. Use it only if you knew it before this message." A hard block is an open question; the default is the banner, because a hard block also stops the first legitimate use.
+**During a live scam, the message says "my new number is …" and the parent adds it.** The case target is always an existing `child_member_id`. The API never reads a phone number out of `parent_text`, the transcript, or an inbound caller ID. Adding a member is a different screen from Verify. Families will install on the day they are scared, so a new number can still be called. A yes on that call during the first 24 hours is yellow (`number_recent`), not green. A no is still red. The parent is pushed as soon as the change is requested. The check is not hard-blocked.
+
+**Caller ID that matches the child.** Spoofing the child's number is in scope. Nothing in the app, the Call Directory list, or `CallScreeningService` tells the parent that an incoming call from that number is safe. Those extensions contain one number: ours.
 
 **Scammer registers many families to run up call charges or to harass.** Sign in with Apple or Google limits how cheap a new account is. International minutes to `+82` make the cap more important than it was for US-only calls. A parent may open at most 5 cases per child per rolling 24 hours, and at most 10 case opens per parent per rolling 24 hours. A call attempt counts even if nobody answers. Over the limit, the case is refused with `rate_limited` and nothing is dialed. Numbers are tunable; the existence of a cap is not.
 
@@ -601,6 +623,46 @@ Ship these English strings, and Korean translations of the same meaning, as a st
 - Yellow, no number: "There is no verified number for {name}, so no call was made. Don't send money. Call your child on the number you already know."
 - Yellow, call failed or timeout or wrong code or no answer: the matching paragraph already in Guardian `finish` (`on_code_result`, `on_reached`, `check_timeouts`). A wrong code is yellow, never red.
 - Yellow, code locked: "We couldn't check {name}'s code. Don't send money. They can set a new check code in the app."
+- Yellow, number recent: "{name} said yes on a call to a number that was registered or changed in the last 24 hours. That is not confirmed. Don't send money. Talk to {name} on the number you already knew, or wait and check again from the app."
+
+## Safe Wallet (after v1)
+
+Not in v1. M1–M18 do not move money. This feature starts only after a licensing note, as M19.
+
+A parent who has already asked us to check a request can set aside the amount they were asked for, or less. If the case ends green, that money is released to a payout account the child registered in advance. Every other ending refunds the parent. Family Shield does not hold the funds. A licensed provider's hold does. Stripe Connect is the example, not a decision. The provider has to be able to hold and then either pay out or refund. Card numbers stay with the provider. We store their hold id and payout-account id.
+
+The wallet does not change the case. The case result drives the wallet.
+
+```text
+none  -- the parent has not set money aside
+  → holding     parent confirmed an amount; provider accepted the hold
+holding
+  → released    case result is sent (green). Not number_recent.
+  → refunded    case result is anything else terminal: not_sent, number_recent,
+                wrong, no_answer, timeout, code_locked, unreachable, call_failed,
+                no_number. Also when the provider's hold expires, or the payout
+                account is missing or was added or changed less than 24 hours ago.
+released and refunded are terminal
+```
+
+A yellow case refunds, including a yes that was downgraded because the number is new. A red case refunds. A timeout refunds. There is no path where a human at Family Shield chooses to release. The parent chose the amount when they created the hold. The amount Claude extracted from the voice note is not a payment instruction, and the app does not pre-fill the hold with it.
+
+The child registers the payout account in the app after a biometric check. The parent sees the last four characters and confirms, the same shape as a phone number. `payout_current_since` works like `phone_current_since`. A release to an account newer than 24 hours refunds instead, and both parents are notified when the account is added or changed. That is the control against a scammer putting their own account on the family. A green from a freshly registered phone number never releases, because that result is already `number_recent`.
+
+Regulatory, before any real charge. This is not legal advice:
+
+- **United States.** Receiving customer funds and paying them to someone else is money transmission under state law. Using Stripe, or anyone similar, does not by itself mean we are not a money transmitter. Some structures keep the float on the licensed provider's books and leave us as a platform. Whether that fits has to be answered for each state we would offer this in. v1 does not offer it anywhere.
+- **Korea.** Moving KRW for customers, or running an escrow, points at electronic financial business registration (전자금융업). A parent in Korea funding a payout in the US is also a cross-border remittance, which sits under the Foreign Exchange Transactions Act. That is a separate registration from anything we do for a US card.
+- **What v1 ships.** No charges, no stored balance, no "we'll hold it" copy. The green screen still says to talk to the child before sending anything. It does not offer Safe Wallet.
+
+### Open questions for Safe Wallet
+
+These block M19. They do not block v1.
+
+1. Which licensed provider, and can they take money from a parent in Korea and pay a student in the US without us holding the float? If not, the first version is US card to US payout only, and Korea waits.
+2. Which legal entity offers it, and in which US states?
+3. How long may a hold sit before the provider forces a refund, and what is the maximum amount a parent can set aside on one case?
+4. Does the child need to accept the payout in the app before release, or is a pre-confirmed account enough?
 
 ## Phased plan
 
@@ -612,7 +674,7 @@ The first four milestones are the backend extraction. They can be tested with `p
 
 Create `backend/verify.py` and `tests/test_verify.py`.
 
-`apply(case, event) -> case` implements the transitions. `case` is a plain dict with `state`, `result`, `code_channel`, `has_app`, `has_push_token`, `has_opted_in_phone`, `static_locked`, and `slow_checks`. No database and no HTTP yet. The signature matches the one the later store calls.
+`apply(case, event) -> case` implements the transitions. `case` is a plain dict with `state`, `result`, `answered_via`, `code_channel`, `has_app`, `has_push_token`, `has_opted_in_phone`, `number_recent`, `static_locked`, and `slow_checks`. No database and no HTTP yet. The signature matches the one the later store calls. `number_recent` is true when the current phone became the dial target less than 24 hours ago.
 
 Tests:
 
@@ -623,7 +685,8 @@ Tests:
 - entering `calling` with `has_app` sets `code_channel` to `one_time`; without `has_app` it sets `static`
 - `answer_no` before `code_accepted` does not change the result
 - `answer_unclear` yields `no_answer`, not `not_sent`
-- `answer_yes` yields `confirmed` / `sent`; a later `answer_no` is ignored
+- `answer_yes` on the push channel yields `confirmed` / `sent`; a later `answer_no` is ignored
+- `answer_yes` on the call channel while `number_recent` is set yields `not_confirmed` / `number_recent`, never green; `answer_no` on that same call still yields `scam` / `not_sent`
 - push yes during `calling` decides the case; a following `code_rejected` is ignored
 - `start` with no push token and no phone yields `no_number`
 - `start` with no app and `static_locked` yields `code_locked` and does not call
@@ -642,7 +705,7 @@ This replaces `services/data_tools.py` `hash_code` for new data. Do not "migrate
 
 Create `backend/schema.sql`, `backend/store.py`, and `tests/test_store.py`.
 
-Tables are the data model above, including `family_events`, `code_channel`, the one-time hash columns, `deadline_at`, and `pending_phone_e164`. There is no `code_misses` column and no plaintext code column. The store functions load a case `FOR UPDATE`, copy `has_app` (`user_id` is set), `has_push_token`, `has_opted_in_phone`, and `static_locked` (five static mismatches since `code_set_at` in the last 24 hours) from the member, call `apply`, set `deadline_at` from the state just entered (90s, 180s, or 45s), and insert the `case_events` row in the same transaction. A static mismatch row is how the lock is counted. It stores the outcome, not the digits. Tests run against Postgres started with a `docker-compose.yml` added in this PR. If that Postgres is not up, pytest skips with a message that includes the compose command. This repo has no CI yet; the compose file is the test setup. A comment at the top of `schema.sql` repeats the command. Do not add a second SQLite schema.
+Tables are the data model above, including `family_events`, `code_channel`, the one-time hash columns, `deadline_at`, and `pending_phone_e164`. There is no `code_misses` column and no plaintext code column. The store functions load a case `FOR UPDATE`, copy `has_app` (`user_id` is set), `has_push_token`, `has_opted_in_phone`, `number_recent` (`phone_current_since` within 24 hours), and `static_locked` (five static mismatches since `code_set_at` in the last 24 hours) from the member, call `apply`, set `deadline_at` from the state just entered (90s, 180s, or 45s), and insert the `case_events` row in the same transaction. A static mismatch row is how the lock is counted. It stores the outcome, not the digits. Tests run against Postgres started with a `docker-compose.yml` added in this PR. If that Postgres is not up, pytest skips with a message that includes the compose command. This repo has no CI yet; the compose file is the test setup. A comment at the top of `schema.sql` repeats the command. Do not add a second SQLite schema.
 
 ### M4. API that can be tested without a handset
 
@@ -712,9 +775,9 @@ New `android/` Kotlin project. Google Sign-In, create family, show invite secret
 
 Accept invite, enter a `+1` or `+82` phone, enter OTP, set the check code twice, register an FCM token, show the pending question, run `BiometricPrompt` (the emulator can approve it), post yes or no. The same biometric gate reveals the 6-digit code while the case is `calling`. A UI test covers dismissing the screen without posting, which must leave the case non-terminal so the backend can fall through to the call. The notification itself has no yes/no action and no code. Resetting the check code requires `BiometricPrompt` again.
 
-### M15. Number changes, caps, and the banner
+### M15. Number changes, caps, and the 24-hour rule
 
-Parent-confirms-new-number flow, including a change from `+1` to `+82` and the reverse (the next call uses the new prefix's language). Open cases on that member end as `timeout`. Rate limits with tests at the boundary (5th case succeeds, 6th returns `rate_limited` and the fake provider has no new call). Five static mismatches in 24 hours lock the check code; the next static attempt returns `code_locked` and does not dial. A wrong one-time code does not count toward that lock. Setting a new check code clears it. Family-event rows. Banner when the member was confirmed less than 24 hours ago.
+Parent-confirms-new-number flow, including a change from `+1` to `+82` and the reverse (the next call uses the new prefix's language). Open cases on that member end as `timeout`. Confirming the change sets `phone_current_since`. A test places a call-channel yes inside that 24-hour window and expects `number_recent` (yellow), and a call-channel no in the same window and expects `not_sent` (red). A push yes in the window stays `sent`. Requesting a change and confirming it each create a parent push and an SMS to the number being replaced; the test records those sends and asserts the SMS body has no code. Rate limits with tests at the boundary (5th case succeeds, 6th returns `rate_limited` and the fake provider has no new call). Five static mismatches in 24 hours lock the check code; the next static attempt returns `code_locked` and does not dial. A wrong one-time code does not count toward that lock. Setting a new check code clears it. Family-event rows. There is no separate "recent number" banner; the yellow result is the rule.
 
 ### M16. Call-only child
 
@@ -722,13 +785,17 @@ SMS allow-link and the mobile web confirm page, for a child who will not install
 
 ### M17. Label our own outbound number
 
-iOS Call Directory extension and Android `CallScreeningService`, each containing one number: the Twilio caller id, labeled "Family Shield". This is the fix for the README note that an unknown caller gets silenced. It is not a database of scam numbers.
+iOS Call Directory extension and Android `CallScreeningService`, each containing one number: the Twilio caller id, labeled "Family Shield". This is the fix for the README note that an unknown caller gets silenced. It is not a database of scam numbers, and it does not contain the child's number. A call or message that displays the child's number is not labeled genuine. The extension must not gain a code path that takes a caller ID and returns "verified".
 
 On Android the user must grant `ROLE_CALL_SCREENING`, and only one app can hold it. `onScreenCall` must `respondToCall` within 5 seconds and allow our call. If the app shows a caller-id UI, that UI is an activity launched from `onScreenCall` saying "Family Shield", which is what the platform documents for caller ID. The service does not read call audio. The platform does not deliver a number that is already in the user's contacts unless the app has `READ_CONTACTS`; we do not request that permission, because a saved contact already shows the name. Enabling either feature is optional. The check code works without it. The app can deep-link the user to the system setting.
 
 ### M18. Remove the agent stack
 
-Delete `agents/`, `shared/trust.py`, the uAgents models, Moss, Apify, the unused Supabase client, and the product's dependence on `deliver_voice_message` and `cartesia_setup.py` (those files go too, once nothing calls them). Move any copy still imported from `shared/cards.py` first. `make check` becomes `pytest`. Update the top of the README so a new reader sees the product, and keep a short "Hackathon demo (archived)" note that points at the git tag of the last agent commit. Do this last, in its own PR, after the iOS and Android child paths are usable.
+Delete `agents/`, `shared/trust.py`, the uAgents models, Moss, Apify, the unused Supabase client, and the product's dependence on `deliver_voice_message` and `cartesia_setup.py` (those files go too, once nothing calls them). Move any copy still imported from `shared/cards.py` first. `make check` becomes `pytest`. Update the top of the README so a new reader sees the product, and keep a short "Hackathon demo (archived)" note that points at the git tag of the last agent commit. Do this last, in its own PR, after the iOS and Android child paths are usable. Safe Wallet is not part of this cleanup and is not part of v1.
+
+### M19. Safe Wallet, after v1
+
+Do not start this until v1 cases are in use and a lawyer has answered the licensing questions in [Safe Wallet](#safe-wallet-after-v1). The first PR is the hold/release state machine with a fake provider: a parent hold on a case, release only when the stored result is `sent`, refund on every other terminal result including `number_recent`, `not_sent`, and `timeout`. No Stripe keys, no real money, in that PR. A later PR plugs in whichever licensed provider the licensing note names. Payout-account changes follow the same 24-hour cooldown as phone numbers: a release to an account newer than that refunds instead.
 
 ## Open questions
 
@@ -738,12 +805,12 @@ Delete `agents/`, `shared/trust.py`, the uAgents models, Moss, Apify, the unused
 2. **Child numbers are not US-only.** Decided: v1 places the fallback call to `+1` and to `+82`. Other country codes are rejected at enrollment.
 3. **The fallback call does not use a voice agent.** Decided: primary is push plus a biometric answer. Fallback is Twilio `<Play>` of a prerecorded Cartesia mp3 and `<Gather input="dtmf">`. The code comes first, then 1 or 2. No LLM on the call. Language comes from the number (`+82` Korean, `+1` English), not from the device locale. Cartesia remains for voice-note STT and for rendering those files. Claude remains for claims and the pattern id only.
 4. **Who knows the code.** Decided: only the child. They set the 4-digit check code in the app, or on the allow page if they have no app. The parent never sees it. It is stored as argon2id with a pepper. A forgotten code is reset by the child after a biometric check, or through a new SMS link if they have no app. One wrong code on a call hangs up immediately. Five static mismatches in 24 hours lock that code until the child resets it. When the child has the app but missed the push, the fallback call asks for a server-generated 6-digit code instead, shown in the app only after biometric unlock, one code per case, 5 minutes, single use, stored as a hash. Pressing star on that call switches to the static check code. SMS OTP only proves the number at signup and number change. It is not a code on the verification call.
+5. **A number registered or changed in the last 24 hours.** Decided: not a hard block, and not a banner. A yes obtained on a call to that number is stored as `number_recent` and shown yellow, with copy that the number changed recently. A no on that call is still red. A yes from the enrolled device stays green. Any number change notifies the parent app immediately, and notifies the old number by SMS. Safe Wallet, later, treats `number_recent` as a refund, not a release.
 
 ### Still open
 
-These defaults are what the milestones assume. An answer changes a milestone. It does not block M1.
+These defaults are what the milestones assume. An answer changes a milestone. It does not block M1. Safe Wallet has its own questions in that section; they do not block v1.
 
-5. **Hard-block verification against a member added in the last 24 hours, or show the banner?** Default: banner.
 6. **Is 30 days the right transcript retention, and is a Korean parent owed a specific privacy notice (PIPA) beyond the sign-up sentence?** Default: 30 days, and a short in-app notice that names Family Shield, Cartesia, Twilio, Anthropic, and Apple or Google. A lawyer should read that notice before a public store release. The pilot can use the same text stamped "pilot".
 7. **Where does Postgres run?** Default: a host that gives a `DATABASE_URL` with encryption at rest. A Supabase Postgres project is fine. The Supabase storage API and client library are not used.
 8. **KakaoTalk share behavior.** Can KakaoTalk on iOS and on Android share a received voice note as an audio file to another app? Someone has to try both. If one of them cannot, that platform's share milestone still ships for the Files app, and parents paste text.
