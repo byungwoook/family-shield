@@ -8,8 +8,8 @@ second event after a terminal state, writes nothing.
 
 `now` is the clock. `rng` is forwarded to `backend.codes` when a one-time
 code or a static salt has to be chosen. This module does not call
-`datetime.now` or `secrets`. The one-time plaintext sits in `memory` (the
-process dict when the caller passes none). It is never a column.
+`datetime.now` or `secrets`. A one-time code is not kept. The row stores a
+nonce, and `call_code` derives the digits from that nonce.
 
 See tests/test_store.py for the readings this file locks in.
 """
@@ -25,6 +25,8 @@ from psycopg.rows import dict_row
 from backend.codes import (
     OneTimeChallenge,
     StaticCode,
+    derive_one_time,
+    generate_one_time,
     issue_one_time,
     set_static_code,
     static_code_locked,
@@ -45,14 +47,13 @@ _DEADLINES = {
     "awaiting_answer": ANSWER_WINDOW,
 }
 _E164 = re.compile(r"^\+[1-9][0-9]{1,14}$")
-_CALL_CODES: dict[str, dict] = {}
-
 _CASE_SQL = """
     SELECT
         c.id, c.family_id, c.opened_by, c.child_member_id,
-        c.state, c.result, c.answered_via, c.code_channel,
+        c.state, c.result, c.answered_via,         c.code_channel,
         c.parent_text, c.transcript, c.claims, c.pattern_id,
-        c.one_time_code_hash, c.one_time_code_expires_at, c.one_time_code_used_at,
+        c.one_time_nonce, c.one_time_code_hash,
+        c.one_time_code_expires_at, c.one_time_code_used_at,
         c.deadline_at, c.audio_deleted_at, c.created_at, c.updated_at, c.decided_at,
         m.user_id, m.push_token, m.phone_e164, m.phone_opted_in_at,
         m.phone_current_since, m.code_set_at, m.code_hash, m.code_salt
@@ -68,11 +69,6 @@ class CaseNotFound(LookupError):
 
 class PhoneInUse(Exception):
     """This E.164 is already a non-removed member's phone or pending phone."""
-
-
-def clear_call_codes() -> None:
-    """Drop every in-process one-time plaintext. A restart does this too."""
-    _CALL_CODES.clear()
 
 
 def apply_schema(conn) -> None:
@@ -358,7 +354,7 @@ def load_case(conn, case_id: UUID, *, now: datetime) -> dict:
     return _view(conn, row, now)
 
 
-def apply_case(conn, case_id: UUID, event: str, *, now: datetime, rng=None, memory=None) -> dict:
+def apply_case(conn, case_id: UUID, event: str, *, now: datetime, rng=None) -> dict:
     """Apply one state-machine event and persist it in this transaction."""
     _require_aware(now, "now")
     if not isinstance(event, str):
@@ -377,14 +373,13 @@ def apply_case(conn, case_id: UUID, event: str, *, now: datetime, rng=None, memo
         now=now,
         step=event,
         rng=rng,
-        memory=_memory(memory),
         used_at=row["one_time_code_used_at"],
     )
     fresh = _load(conn, case_id, lock=False)
     return _view(conn, fresh, now)
 
 
-def submit_digits(conn, case_id: UUID, digits: str, *, now: datetime, memory=None) -> dict:
+def submit_digits(conn, case_id: UUID, digits: str, *, now: datetime) -> dict:
     """Turn keypad digits into one apply() event. Digits are not stored."""
     _require_aware(now, "now")
     if not isinstance(digits, str):
@@ -405,13 +400,9 @@ def submit_digits(conn, case_id: UUID, digits: str, *, now: datetime, memory=Non
     updated = apply(machine, decision.event)
     if updated is machine:
         return _view(conn, row, now)
-    mem = _memory(memory)
     used_at = row["one_time_code_used_at"]
     if decision.mark_one_time_used:
         used_at = now
-        mem.pop(str(case_id), None)
-    if decision.timeline_step == "one_time_code_expired":
-        mem.pop(str(case_id), None)
     step = decision.timeline_step or decision.event
     _write_transition(
         conn,
@@ -420,26 +411,64 @@ def submit_digits(conn, case_id: UUID, digits: str, *, now: datetime, memory=Non
         now=now,
         step=step,
         rng=None,
-        memory=mem,
         used_at=used_at,
     )
     fresh = _load(conn, case_id, lock=False)
     return _view(conn, fresh, now)
 
 
-def call_code(case_id: UUID, *, now: datetime, memory=None) -> str | None:
-    """Plaintext for this process, or None once it is used, expired, or gone."""
+def reissue_one_time(conn, case_id: UUID, *, now: datetime, rng=None) -> dict:
+    """Replace the nonce. The previous digits no longer match the stored hash.
+
+    Legal only while this case is `calling` on the one-time channel and a
+    nonce is already stored. Expiry starts again at `now`. `used_at` is cleared.
+    """
     _require_aware(now, "now")
-    mem = _memory(memory)
-    item = mem.get(str(case_id))
-    if item is None:
+    row = _load(conn, case_id, lock=True)
+    if row is None:
+        raise CaseNotFound(str(case_id))
+    if row["state"] != "calling" or row["code_channel"] != "one_time":
+        raise ValueError("one_time_not_active")
+    if row["one_time_nonce"] is None:
+        raise ValueError("one_time_not_issued")
+    issued = generate_one_time(case_id=case_id, now=now, rng=rng)
+    _execute(
+        conn,
+        """
+        UPDATE cases SET
+            one_time_nonce = %s,
+            one_time_code_hash = %s,
+            one_time_code_expires_at = %s,
+            one_time_code_used_at = NULL,
+            updated_at = %s
+        WHERE id = %s
+        """,
+        (issued.nonce, issued.code_hash, issued.expires_at, now, case_id),
+    )
+    fresh = _load(conn, case_id, lock=False)
+    return _view(conn, fresh, now)
+
+
+def call_code(conn, case_id: UUID, *, now: datetime) -> str | None:
+    """Digits derived from the stored nonce, or None when none can be shown.
+
+    None means the case has no nonce, the code was used, or `now` is at or
+    after `one_time_code_expires_at`. The nonce stays in the row.
+    """
+    _require_aware(now, "now")
+    row = _load(conn, case_id, lock=False)
+    if row is None:
+        raise CaseNotFound(str(case_id))
+    nonce = row["one_time_nonce"]
+    if nonce is None or row["one_time_code_used_at"] is not None:
         return None
-    expires_at = item["expires_at"]
+    expires_at = row["one_time_code_expires_at"]
     _require_aware(expires_at, "expires_at")
     if now >= expires_at:
-        mem.pop(str(case_id), None)
         return None
-    return item["code"]
+    if not isinstance(nonce, bytes):
+        nonce = bytes(nonce)
+    return derive_one_time(case_id, nonce)
 
 
 def _write_transition(
@@ -450,25 +479,22 @@ def _write_transition(
     now: datetime,
     step: str,
     rng,
-    memory: dict,
     used_at,
 ) -> None:
+    nonce = row["one_time_nonce"]
     code_hash = row["one_time_code_hash"]
     expires_at = row["one_time_code_expires_at"]
     if (
         updated["state"] == "calling"
         and row["state"] != "calling"
         and updated.get("code_channel") == "one_time"
-        and code_hash is None
+        and nonce is None
     ):
-        issued = issue_one_time(updated, now=now, rng=rng)
+        issued = issue_one_time({**updated, "id": row["id"]}, now=now, rng=rng)
         if issued is not None:
+            nonce = issued.nonce
             code_hash = issued.code_hash
             expires_at = issued.expires_at
-            memory[str(row["id"])] = {
-                "code": issued.code,
-                "expires_at": issued.expires_at,
-            }
     if updated["state"] != row["state"]:
         deadline = deadline_for(updated["state"], now)
         decided = now if updated["state"] in _TERMINAL else None
@@ -483,6 +509,7 @@ def _write_transition(
             result = %s,
             answered_via = %s,
             code_channel = %s,
+            one_time_nonce = %s,
             one_time_code_hash = %s,
             one_time_code_expires_at = %s,
             one_time_code_used_at = %s,
@@ -496,6 +523,7 @@ def _write_transition(
             updated["result"],
             updated["answered_via"],
             updated["code_channel"],
+            nonce,
             code_hash,
             expires_at,
             used_at,
@@ -542,6 +570,7 @@ def _view(conn, row: dict, now: datetime) -> dict:
         "transcript": row["transcript"],
         "claims": row["claims"],
         "pattern_id": row["pattern_id"],
+        "one_time_nonce": row["one_time_nonce"],
         "one_time_code_hash": row["one_time_code_hash"],
         "one_time_code_expires_at": row["one_time_code_expires_at"],
         "one_time_code_used_at": row["one_time_code_used_at"],
@@ -691,10 +720,6 @@ def _steps(conn, case_id: UUID) -> list[str]:
         (case_id,),
     )
     return [row["step"] for row in rows]
-
-
-def _memory(memory: dict | None) -> dict:
-    return _CALL_CODES if memory is None else memory
 
 
 def _require_e164(value: str) -> str:

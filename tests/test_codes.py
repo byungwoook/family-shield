@@ -19,18 +19,23 @@ import ast
 import hashlib
 import hmac
 import inspect
+import hashlib
+import hmac
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 
 from backend.codes import (
     BiometricRequired,
     CodeConfigError,
+    DerivationKeyError,
     OneTimeChallenge,
     OneTimeCode,
     StaticCode,
     Submission,
+    derive_one_time,
     generate_one_time,
     hash_code,
     hash_one_time,
@@ -41,11 +46,16 @@ from backend.codes import (
     verify_code,
     verify_one_time,
 )
+from backend import codes as codes_module
 from backend.verify import apply
 
 
 PEPPER = "test-pepper-0123456789"
 OTHER_PEPPER = "another-pepper-0123456789"
+DERIVATION_KEY = "test-derivation-key-0123456789"
+OTHER_DERIVATION_KEY = "other-derivation-key-0123456789"
+CASE_ID = UUID("11111111-2222-3333-4444-555555555555")
+NONCE = bytes(range(16))
 SALT_A = bytes(range(16))
 SALT_B = bytes(range(16, 32))
 NOW = datetime(2026, 11, 3, 1, 0, tzinfo=timezone.utc)
@@ -57,7 +67,16 @@ ONE_TIME_DIGITS = "135790"
 @pytest.fixture
 def pepper(monkeypatch):
     monkeypatch.setenv("CODE_PEPPER", PEPPER)
+    monkeypatch.setenv("OTP_DERIVATION_KEY", DERIVATION_KEY)
     return PEPPER
+
+
+def nonce_rng(n):
+    return b"\x11" * n
+
+
+def issued_digits(issued, case_id=CASE_ID):
+    return derive_one_time(case_id, issued.nonce)
 
 
 @pytest.fixture
@@ -260,54 +279,126 @@ def test_hash_one_time_rejects_a_non_string(pepper):
 # --- Issuing a one-time code ---
 
 
+def test_derive_one_time_is_hmac_rejection_sampling(pepper):
+    code = derive_one_time(CASE_ID, NONCE)
+    assert len(code) == 6 and code.isdigit()
+    again = derive_one_time(str(CASE_ID), NONCE)
+    assert again == code
+    assert derive_one_time(CASE_ID, bytes(range(16, 32))) != code
+    message = CASE_ID.bytes + NONCE
+    digest = hmac.new(
+        DERIVATION_KEY.encode("utf-8"), message, hashlib.sha256
+    ).digest()
+    assert code == f"{int.from_bytes(digest, 'big') % 1_000_000:06d}"
+
+
+def test_derivation_key_is_not_the_pepper(pepper, monkeypatch):
+    first = derive_one_time(CASE_ID, NONCE)
+    monkeypatch.setenv("OTP_DERIVATION_KEY", OTHER_DERIVATION_KEY)
+    assert derive_one_time(CASE_ID, NONCE) != first
+    monkeypatch.setenv("OTP_DERIVATION_KEY", DERIVATION_KEY)
+    monkeypatch.setenv("CODE_PEPPER", OTHER_PEPPER)
+    assert derive_one_time(CASE_ID, NONCE) == first
+
+
+def test_missing_derivation_key_raises(monkeypatch):
+    monkeypatch.setenv("CODE_PEPPER", PEPPER)
+    monkeypatch.delenv("OTP_DERIVATION_KEY", raising=False)
+    with pytest.raises(DerivationKeyError) as caught:
+        derive_one_time(CASE_ID, NONCE)
+    assert DERIVATION_KEY not in str(caught.value)
+    assert "135790" not in str(caught.value)
+    monkeypatch.setenv("OTP_DERIVATION_KEY", "   ")
+    with pytest.raises(DerivationKeyError):
+        derive_one_time(CASE_ID, NONCE)
+
+
+def test_biased_digest_is_rejected_and_retried(pepper, monkeypatch):
+    limit = codes_module._DIGIT_LIMIT
+    tail = limit.to_bytes(32, "big")
+    good_value = limit - 1
+    good = good_value.to_bytes(32, "big")
+    messages = []
+
+    class _Digest:
+        def __init__(self, message):
+            self.message = message
+
+        def digest(self):
+            return tail if len(messages) == 1 else good
+
+    def fake_new(key, msg=b"", digestmod=None):
+        messages.append(msg)
+        return _Digest(msg)
+
+    monkeypatch.setattr(codes_module.hmac, "new", fake_new)
+    code = derive_one_time(CASE_ID, NONCE)
+    assert code == f"{good_value % 1_000_000:06d}"
+    assert messages[0] == CASE_ID.bytes + NONCE
+    assert messages[1] == CASE_ID.bytes + NONCE + (1).to_bytes(4, "big")
+
+
 def test_generate_one_time_uses_the_injected_clock_and_rng(pepper):
-    issued = generate_one_time(now=NOW, rng=lambda: 42)
+    issued = generate_one_time(case_id=CASE_ID, now=NOW, rng=nonce_rng)
+    digits = issued_digits(issued)
     assert isinstance(issued, OneTimeCode)
-    assert issued.code == "000042"
+    assert issued.nonce == b"\x11" * 16
     assert issued.expires_at == NOW + timedelta(minutes=5)
-    assert verify_one_time(issued.code, issued.code_hash) is True
-    assert "000042" not in repr(issued)
-    assert "000042" not in str(issued)
-    assert issued.code not in issued.code_hash
+    assert verify_one_time(digits, issued.code_hash) is True
+    assert digits not in repr(issued)
+    assert digits not in str(issued)
+    assert digits.encode() not in issued.nonce
+    assert not hasattr(issued, "code")
 
 
-def test_rng_must_stay_inside_the_six_digit_range(pepper):
+def test_default_nonce_is_drawn_when_no_rng_is_passed(pepper):
+    issued = generate_one_time(case_id=CASE_ID, now=NOW)
+    other = generate_one_time(case_id=CASE_ID, now=NOW)
+    assert len(issued.nonce) == 16
+    assert other.nonce != issued.nonce
+    assert verify_one_time(derive_one_time(CASE_ID, issued.nonce), issued.code_hash)
+
+
+def test_nonce_rng_must_return_16_bytes(pepper):
     with pytest.raises(ValueError):
-        generate_one_time(now=NOW, rng=lambda: True)
+        generate_one_time(case_id=CASE_ID, now=NOW, rng=lambda n: True)
     with pytest.raises(ValueError):
-        generate_one_time(now=NOW, rng=lambda: -1)
+        generate_one_time(case_id=CASE_ID, now=NOW, rng=lambda n: b"\x11" * 15)
     with pytest.raises(ValueError):
-        generate_one_time(now=NOW, rng=lambda: 1_000_000)
-    top = generate_one_time(now=NOW, rng=lambda: 999_999)
-    assert top.code == "999999"
+        generate_one_time(case_id=CASE_ID, now=NOW, rng=lambda n: b"\x11" * 17)
+    with pytest.raises(ValueError):
+        derive_one_time(CASE_ID, b"\x11" * 15)
 
 
 def test_generate_rejects_a_naive_clock(pepper):
     with pytest.raises(ValueError):
-        generate_one_time(now=datetime(2026, 11, 3), rng=lambda: 1)
+        generate_one_time(case_id=CASE_ID, now=datetime(2026, 11, 3), rng=nonce_rng)
 
 
 def test_issue_one_time_only_while_the_fallback_call_is_asking(pepper):
-    asking = calling_case()
-    issued = issue_one_time(asking, now=NOW, rng=lambda: 7)
-    assert issued.code == "000007"
+    asking = calling_case(id=CASE_ID)
+    issued = issue_one_time(asking, now=NOW, rng=nonce_rng)
+    assert issued.nonce == b"\x11" * 16
+    assert verify_one_time(issued_digits(issued), issued.code_hash) is True
     assert issue_one_time(
-        calling_case(code_channel="static", has_app=False), now=NOW, rng=lambda: 7
+        calling_case(code_channel="static", has_app=False), now=NOW, rng=nonce_rng
     ) is None
     assert issue_one_time(
-        calling_case(state="awaiting_answer"), now=NOW, rng=lambda: 7
+        calling_case(state="awaiting_answer", id=CASE_ID), now=NOW, rng=nonce_rng
     ) is None
     with pytest.raises(ValueError):
-        issue_one_time(asking, now=datetime(2026, 11, 3), rng=lambda: 7)
+        issue_one_time(calling_case(), now=NOW, rng=nonce_rng)
+    with pytest.raises(ValueError):
+        issue_one_time(asking, now=datetime(2026, 11, 3), rng=nonce_rng)
 
 
 def test_push_answer_does_not_issue_a_code():
     waiting = apply(opened(has_app=True, has_push_token=True), "start")
     assert waiting["state"] == "waiting_push"
-    assert issue_one_time(waiting, now=NOW, rng=lambda: 1) is None
+    assert issue_one_time(waiting, now=NOW, rng=nonce_rng) is None
     decided = apply(waiting, "push_answered_yes")
     assert decided["result"] == "sent"
-    assert issue_one_time(decided, now=NOW, rng=lambda: 1) is None
+    assert issue_one_time(decided, now=NOW, rng=nonce_rng) is None
 
 
 def test_missed_push_issues_one_code_for_that_case(pepper):
@@ -315,15 +406,16 @@ def test_missed_push_issues_one_code_for_that_case(pepper):
     calling = apply(waiting, "push_window_elapsed")
     assert calling["state"] == "calling"
     assert calling["code_channel"] == "one_time"
-    issued = issue_one_time(calling, now=NOW, rng=lambda: 42)
-    assert issued.code == "000042"
-    assert "000042" not in "".join(str(value) for value in calling.values())
+    issued = issue_one_time({**calling, "id": CASE_ID}, now=NOW, rng=nonce_rng)
+    digits = issued_digits(issued)
+    assert verify_one_time(digits, issued.code_hash) is True
+    assert digits not in "".join(str(value) for value in calling.values())
 
 
 def test_a_child_without_the_app_is_not_issued_a_one_time_code():
     calling = apply(opened(), "start")
     assert calling["code_channel"] == "static"
-    assert issue_one_time(calling, now=NOW, rng=lambda: 1) is None
+    assert issue_one_time(calling, now=NOW, rng=nonce_rng) is None
 
 
 # --- Static code, biometric reset, lockout ---
@@ -590,33 +682,34 @@ def test_locked_static_channel_does_not_accept_the_right_code(static):
 
 
 def test_one_time_code_expires_at_the_five_minute_mark(pepper):
-    issued = generate_one_time(now=NOW, rng=lambda: 135790)
+    issued = generate_one_time(case_id=CASE_ID, now=NOW, rng=nonce_rng)
+    digits = issued_digits(issued)
     assert issued.expires_at == NOW + timedelta(minutes=5)
     live = challenge(issued)
     case = calling_case()
     still, alive = submit(
         case,
-        ONE_TIME_DIGITS,
+        digits,
         now=issued.expires_at - timedelta(microseconds=1),
         one_time=live,
     )
     assert alive.event == "code_accepted"
     assert alive.mark_one_time_used is True
     assert still["state"] == "awaiting_answer"
-    expired, dead = submit(case, ONE_TIME_DIGITS, now=issued.expires_at, one_time=live)
+    expired, dead = submit(case, digits, now=issued.expires_at, one_time=live)
     assert dead == Submission(
         event="code_rejected",
         timeline_step="one_time_code_expired",
         counts_as_static_mismatch=False,
         mark_one_time_used=False,
     )
-    assert ONE_TIME_DIGITS not in repr(dead)
+    assert digits not in repr(dead)
     assert expired["state"] == "not_confirmed"
     assert expired["result"] == "wrong"
     assert expired["result"] != "not_sent"
     later, also = submit(
         case,
-        ONE_TIME_DIGITS,
+        digits,
         now=issued.expires_at + timedelta(microseconds=1),
         one_time=live,
     )
@@ -625,11 +718,12 @@ def test_one_time_code_expires_at_the_five_minute_mark(pepper):
 
 
 def test_one_time_code_is_single_use(pepper):
-    issued = generate_one_time(now=NOW, rng=lambda: 135790)
+    issued = generate_one_time(case_id=CASE_ID, now=NOW, rng=nonce_rng)
+    digits = issued_digits(issued)
     used = challenge(issued, used_at=NOW)
     ended, decision = submit(
         calling_case(),
-        ONE_TIME_DIGITS,
+        digits,
         now=NOW + timedelta(seconds=30),
         one_time=used,
     )
@@ -642,7 +736,7 @@ def test_one_time_code_is_single_use(pepper):
     accepted = apply(calling_case(), "code_accepted")
     ignored, later = submit(
         accepted,
-        ONE_TIME_DIGITS,
+        digits,
         now=NOW + timedelta(seconds=30),
         one_time=used,
     )
@@ -651,17 +745,20 @@ def test_one_time_code_is_single_use(pepper):
 
 
 def test_a_used_code_past_expiry_is_not_relabeled_as_expired(pepper):
-    issued = generate_one_time(now=NOW, rng=lambda: 135790)
+    issued = generate_one_time(case_id=CASE_ID, now=NOW, rng=nonce_rng)
     used = challenge(issued, used_at=NOW)
     _, decision = submit(
-        calling_case(), ONE_TIME_DIGITS, now=issued.expires_at, one_time=used
+        calling_case(),
+        issued_digits(issued),
+        now=issued.expires_at,
+        one_time=used,
     )
     assert decision.timeline_step == "code_did_not_match"
     assert decision.event == "code_rejected"
 
 
 def test_wrong_one_time_code_ends_the_call_and_does_not_switch(pepper):
-    issued = generate_one_time(now=NOW, rng=lambda: 135790)
+    issued = generate_one_time(case_id=CASE_ID, now=NOW, rng=nonce_rng)
     ended, decision = submit(
         calling_case(), "000000", now=NOW, one_time=challenge(issued)
     )
@@ -694,7 +791,7 @@ def test_one_time_check_fails_closed_without_a_pepper(monkeypatch):
 
 
 def test_one_time_misses_do_not_feed_the_static_lock(pepper):
-    issued = generate_one_time(now=NOW, rng=lambda: 135790)
+    issued = generate_one_time(case_id=CASE_ID, now=NOW, rng=nonce_rng)
     recorded = []
     case = calling_case()
     for _ in range(5):

@@ -8,8 +8,10 @@
 -- The tests apply it themselves, into their own schema. If Postgres is not
 -- running, pytest skips, and the skip message includes: docker compose up -d
 --
--- No miss-counter column and no plaintext code column. The slow-check count
--- is not a column either: it is the count of case_events rows whose step is
+-- No miss-counter column and no plaintext code column. The one-time digits
+-- are not stored: one_time_nonce is 16 random bytes, and the digits are
+-- derived from that nonce and OTP_DERIVATION_KEY. The slow-check count is
+-- not a column either: it is the count of case_events rows whose step is
 -- code_check_slow. The 24-hour static lock counts step static_code_mismatch.
 -- Those rows store the outcome, not the digits.
 
@@ -179,6 +181,7 @@ CREATE TABLE cases (
     claims jsonb,
     pattern_id text,
     code_channel text,
+    one_time_nonce bytea,
     one_time_code_hash text,
     one_time_code_expires_at timestamptz,
     one_time_code_used_at timestamptz,
@@ -244,14 +247,19 @@ CREATE TABLE cases (
     CONSTRAINT cases_one_time_hash_is_hmac CHECK (
         one_time_code_hash IS NULL OR one_time_code_hash ~ '^[0-9a-f]{64}$'
     ),
+    CONSTRAINT cases_one_time_nonce_len CHECK (
+        one_time_nonce IS NULL OR octet_length(one_time_nonce) = 16
+    ),
     CONSTRAINT cases_one_time_parts CHECK (
         (
-            one_time_code_hash IS NULL
+            one_time_nonce IS NULL
+            AND one_time_code_hash IS NULL
             AND one_time_code_expires_at IS NULL
             AND one_time_code_used_at IS NULL
         )
         OR (
-            one_time_code_hash IS NOT NULL
+            one_time_nonce IS NOT NULL
+            AND one_time_code_hash IS NOT NULL
             AND one_time_code_expires_at IS NOT NULL
         )
     ),

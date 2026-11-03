@@ -27,9 +27,11 @@ Readings these tests lock, where the milestone text allows more than one:
   into those flags.
 - `number_recent` is `phone_current_since` strictly less than 24 hours
   before `now`. At exactly 24 hours a keypad yes can be green.
-- The one-time plaintext lives only in the caller's memory dict. It is
-  wiped on use and when that memory's expiry has passed. An empty dict
-  beside an existing hash does not generate a new code.
+- A one-time code is not stored. The row keeps a 16-byte nonce, the
+  pepper hash, expiry, and used-at. `call_code` derives the digits from
+  the nonce and `OTP_DERIVATION_KEY`, so another connection derives the
+  same digits. A re-issue replaces the nonce. Expiry and single use stay
+  on the row. Keypad checks still use the stored hash.
 - One timeline row per transition that changes the case. The step is the
   submission's timeline step when it has one, otherwise the event name.
   A no-op, including a second event on a terminal case, writes nothing.
@@ -50,7 +52,7 @@ from uuid import uuid4
 import psycopg
 import pytest
 
-from backend.codes import hash_one_time
+from backend.codes import derive_one_time, hash_one_time
 from backend.store import (
     ANSWER_WINDOW,
     CODE_WINDOW,
@@ -62,7 +64,6 @@ from backend.store import (
     apply_case,
     apply_schema,
     call_code,
-    clear_call_codes,
     complete_phone_otp,
     create_family,
     create_user,
@@ -70,6 +71,7 @@ from backend.store import (
     load_case,
     member_flags,
     open_case,
+    reissue_one_time,
     set_check_code,
     submit_digits,
 )
@@ -83,8 +85,9 @@ TEST_SCHEMA = "familyshield_test"
 NOW = datetime(2026, 11, 3, 3, 0, tzinfo=timezone.utc)
 CODE_SET = NOW - timedelta(days=3)
 STATIC_CODE = "1357"
-ONE_TIME_CODE = "135790"
 PEPPER = "test-pepper-0123456789"
+DERIVATION_KEY = "test-derivation-key-0123456789"
+NONCE = b"\x42" * 16
 
 TABLES = {
     "users": {
@@ -133,6 +136,7 @@ TABLES = {
         "claims",
         "pattern_id",
         "code_channel",
+        "one_time_nonce",
         "one_time_code_hash",
         "one_time_code_expires_at",
         "one_time_code_used_at",
@@ -258,9 +262,7 @@ def conn(database_url):
 @pytest.fixture(autouse=True)
 def pepper(monkeypatch):
     monkeypatch.setenv("CODE_PEPPER", PEPPER)
-    clear_call_codes()
-    yield
-    clear_call_codes()
+    monkeypatch.setenv("OTP_DERIVATION_KEY", DERIVATION_KEY)
 
 
 def next_phone(country: str = "+1") -> str:
@@ -275,8 +277,12 @@ def fixed_salt(n: int) -> bytes:
     return b"\x22" * n
 
 
-def fixed_rng() -> int:
-    return 135790
+def fixed_rng(n: int) -> bytes:
+    return b"\x42" * n
+
+
+def one_time_digits(case_id) -> str:
+    return derive_one_time(case_id, NONCE)
 
 
 def seed(
@@ -437,6 +443,7 @@ def test_requirements_pin_the_postgres_driver():
 def test_env_example_has_a_database_url_placeholder():
     text = (ROOT / ".env.example").read_text()
     assert "\nDATABASE_URL=\n" in text or text.endswith("DATABASE_URL=\n")
+    assert "\nOTP_DERIVATION_KEY=\n" in text
     assert "postgresql://familyshield:familyshield" not in text
 
 
@@ -459,6 +466,8 @@ def test_store_does_not_read_the_clock_or_talk_to_providers():
                 "token_urlsafe",
             }
     assert "secrets" not in imported
+    assert "_CALL_CODES" not in source
+    assert "clear_call_codes" not in source
     for banned in ("twilio", "anthropic", "requests", "cartesia", "sqlite3", "httpx"):
         assert banned not in imported
 
@@ -579,6 +588,7 @@ def test_schema_tables_and_columns_match_the_data_model(conn):
     assert types[("cases", "claims")] == "jsonb"
     assert types[("cases", "id")] == "uuid"
     assert types[("family_members", "code_salt")] == "bytea"
+    assert types[("cases", "one_time_nonce")] == "bytea"
     flat = {column for names in found.values() for column in names}
     assert FORBIDDEN_COLUMNS.isdisjoint(flat)
 
@@ -802,16 +812,15 @@ def test_open_case_starts_opened_with_no_deadline_and_no_event(conn):
 
 def test_start_with_a_push_token_waits_and_does_not_mint_a_code(conn):
     ids = seed(conn, app=True, push=True)
-    memory = {}
-    row = apply_case(conn, ids["case"], "start", now=NOW, memory=memory, rng=fixed_rng)
+    row = apply_case(conn, ids["case"], "start", now=NOW, rng=fixed_rng)
     assert row["state"] == "waiting_push"
     assert row["result"] is None
     assert row["code_channel"] is None
     assert row["deadline_at"] == NOW + PUSH_WINDOW
     assert row["events"] == ["start"]
     assert row["one_time_code_hash"] is None
-    assert memory == {}
-    assert call_code(ids["case"], now=NOW, memory=memory) is None
+    assert row["one_time_nonce"] is None
+    assert call_code(conn, ids["case"], now=NOW) is None
     assert row["has_app"] is True
     assert row["has_push_token"] is True
 
@@ -876,101 +885,101 @@ def test_flags_are_read_when_the_event_is_applied(conn):
 
 def test_call_only_child_enters_calling_on_the_static_channel(conn):
     ids = seed(conn, app=False, push=False, static=True)
-    memory = {}
-    row = apply_case(conn, ids["case"], "start", now=NOW, memory=memory, rng=fixed_rng)
+    row = apply_case(conn, ids["case"], "start", now=NOW, rng=fixed_rng)
     assert row["state"] == "calling"
     assert row["code_channel"] == "static"
     assert row["has_app"] is False
     assert row["deadline_at"] == NOW + CODE_WINDOW
     assert row["one_time_code_hash"] is None
+    assert row["one_time_nonce"] is None
     assert row["events"] == ["start"]
-    assert memory == {}
     assert STATIC_CODE not in case_text(conn, ids["case"])
 
 
 def test_app_child_without_a_token_gets_one_one_time_code(conn):
     ids = seed(conn, app=True, push=False, country="+82")
-    memory = {}
-    row = apply_case(conn, ids["case"], "start", now=NOW, memory=memory, rng=fixed_rng)
+    row = apply_case(conn, ids["case"], "start", now=NOW, rng=fixed_rng)
+    code = one_time_digits(ids["case"])
     assert row["state"] == "calling"
     assert row["code_channel"] == "one_time"
     assert row["deadline_at"] == NOW + CODE_WINDOW
-    assert row["one_time_code_hash"] == hash_one_time(ONE_TIME_CODE)
+    assert bytes(row["one_time_nonce"]) == NONCE
+    assert row["one_time_code_hash"] == hash_one_time(code)
     assert row["one_time_code_expires_at"] == NOW + timedelta(minutes=5)
     assert row["one_time_code_used_at"] is None
-    assert call_code(ids["case"], now=NOW, memory=memory) == ONE_TIME_CODE
-    assert ONE_TIME_CODE not in case_text(conn, ids["case"])
+    assert call_code(conn, ids["case"], now=NOW) == code
+    assert code not in case_text(conn, ids["case"])
+    assert code.encode() not in bytes(row["one_time_nonce"])
     assert ids["phone"].startswith("+82")
     stored = conn.execute(
-        "SELECT one_time_code_hash FROM cases WHERE id = %s",
+        "SELECT one_time_code_hash, one_time_nonce FROM cases WHERE id = %s",
         (ids["case"],),
-    ).fetchone()[0]
+    ).fetchone()
     again = apply_case(
         conn,
         ids["case"],
         "call_accepted",
         now=NOW + timedelta(seconds=5),
-        memory={},
-        rng=lambda: 0,
+        rng=lambda n: b"\x99" * n,
     )
     assert again["events"] == ["start"]
     assert again["deadline_at"] == NOW + CODE_WINDOW
     assert again["updated_at"] == row["updated_at"]
-    assert again["one_time_code_hash"] == stored
-    assert call_code(ids["case"], now=NOW, memory=memory) == ONE_TIME_CODE
+    assert again["one_time_code_hash"] == stored[0]
+    assert bytes(again["one_time_nonce"]) == bytes(stored[1])
+    assert call_code(conn, ids["case"], now=NOW) == code
 
 
-def test_a_restart_does_not_invent_a_new_one_time_code(conn):
+def test_a_restart_derives_the_same_code_and_use_hides_it(conn, database_url):
     ids = seed(conn, app=True, push=False)
-    first = {}
-    apply_case(conn, ids["case"], "start", now=NOW, memory=first, rng=fixed_rng)
+    apply_case(conn, ids["case"], "start", now=NOW, rng=fixed_rng)
+    code = one_time_digits(ids["case"])
     hashed = load_case(conn, ids["case"], now=NOW)["one_time_code_hash"]
-    restarted = {}
-    row = apply_case(
-        conn,
-        ids["case"],
-        "call_accepted",
-        now=NOW + timedelta(seconds=1),
-        memory=restarted,
-        rng=lambda: 1,
-    )
-    assert row["one_time_code_hash"] == hashed
-    assert call_code(ids["case"], now=NOW, memory=restarted) is None
-    assert restarted == {}
-    accepted = submit_digits(conn, ids["case"], ONE_TIME_CODE, now=NOW, memory=first)
-    assert accepted["state"] == "awaiting_answer"
-    assert accepted["one_time_code_hash"] == hashed
-    assert accepted["one_time_code_used_at"] == NOW
-    assert call_code(ids["case"], now=NOW, memory=first) is None
-    assert first == {}
-    assert restarted == {}
+    conn.commit()
+    other = _connect(database_url)
+    try:
+        assert call_code(other, ids["case"], now=NOW) == code
+        assert call_code(conn, ids["case"], now=NOW) == code
+        accepted = submit_digits(conn, ids["case"], code, now=NOW)
+        conn.commit()
+        assert accepted["state"] == "awaiting_answer"
+        assert accepted["one_time_code_hash"] == hashed
+        assert accepted["one_time_code_used_at"] == NOW
+        assert call_code(other, ids["case"], now=NOW) is None
+        assert bytes(accepted["one_time_nonce"]) == NONCE
+    finally:
+        other.close()
+        _delete_user_graph(database_url)
 
 
-def test_one_time_code_is_wiped_when_the_memory_expiry_passes(conn):
+def test_expiry_hides_the_code_and_the_nonce_stays(conn):
     ids = seed(conn, app=True, push=False)
-    memory = {}
-    issued = apply_case(conn, ids["case"], "start", now=NOW, memory=memory, rng=fixed_rng)
-    assert call_code(ids["case"], now=issued["one_time_code_expires_at"], memory=memory) is None
-    assert memory == {}
+    issued = apply_case(conn, ids["case"], "start", now=NOW, rng=fixed_rng)
+    assert call_code(conn, ids["case"], now=issued["one_time_code_expires_at"]) is None
+    stored = conn.execute(
+        "SELECT one_time_nonce, one_time_code_hash FROM cases WHERE id = %s",
+        (ids["case"],),
+    ).fetchone()
+    assert bytes(stored[0]) == NONCE
+    assert stored[1] == issued["one_time_code_hash"]
 
 
 def test_push_window_with_an_app_places_one_call_and_one_code(conn):
     ids = seed(conn, app=True, push=True)
     apply_case(conn, ids["case"], "start", now=NOW)
-    memory = {}
     row = apply_case(
         conn,
         ids["case"],
         "push_window_elapsed",
         now=NOW + PUSH_WINDOW,
-        memory=memory,
         rng=fixed_rng,
     )
+    code = one_time_digits(ids["case"])
     assert row["state"] == "calling"
     assert row["code_channel"] == "one_time"
     assert row["deadline_at"] == NOW + PUSH_WINDOW + CODE_WINDOW
-    assert row["one_time_code_hash"] == hash_one_time(ONE_TIME_CODE)
-    assert memory[str(ids["case"])]["code"] == ONE_TIME_CODE
+    assert row["one_time_code_hash"] == hash_one_time(code)
+    assert call_code(conn, ids["case"], now=NOW + PUSH_WINDOW) == code
 
 
 def test_push_failure_without_a_phone_is_unreachable_and_mints_no_code(conn):
@@ -1285,7 +1294,7 @@ def test_star_switches_to_the_static_code_once(conn):
     assert switched["code_channel"] == "static"
     assert switched["events"] == ["start", "use_static_code"]
     assert switched["deadline_at"] == NOW + CODE_WINDOW
-    assert switched["one_time_code_hash"] == hash_one_time(ONE_TIME_CODE)
+    assert switched["one_time_code_hash"] == hash_one_time(one_time_digits(ids["case"]))
     again = submit_digits(conn, ids["case"], "", now=NOW + timedelta(seconds=2))
     assert again["events"] == ["start", "use_static_code"]
     assert again["code_channel"] == "static"
@@ -1311,22 +1320,22 @@ def test_star_when_the_static_code_is_locked_does_not_ask_for_digits(conn):
     assert "static_code_mismatch" not in row["events"]
 
 
-def test_expired_one_time_code_hangs_up_yellow_and_wipes_the_plaintext(conn):
+def test_expired_one_time_code_hangs_up_yellow(conn, caplog):
     ids = seed(conn, app=True, push=False)
-    memory = {}
-    issued = apply_case(conn, ids["case"], "start", now=NOW, memory=memory, rng=fixed_rng)
+    issued = apply_case(conn, ids["case"], "start", now=NOW, rng=fixed_rng)
+    code = one_time_digits(ids["case"])
     done = submit_digits(
         conn,
         ids["case"],
-        ONE_TIME_CODE,
+        code,
         now=issued["one_time_code_expires_at"],
-        memory=memory,
     )
     assert done["result"] == "wrong"
     assert done["events"][-1] == "one_time_code_expired"
     assert done["one_time_code_used_at"] is None
-    assert memory == {}
-    assert ONE_TIME_CODE not in case_text(conn, ids["case"])
+    assert call_code(conn, ids["case"], now=issued["one_time_code_expires_at"]) is None
+    assert code not in case_text(conn, ids["case"])
+    assert code not in caplog.text
 
 
 def test_a_used_one_time_code_is_rejected_when_the_case_is_still_calling(conn):
@@ -1336,9 +1345,72 @@ def test_a_used_one_time_code_is_rejected_when_the_case_is_still_calling(conn):
         "UPDATE cases SET one_time_code_used_at = %s WHERE id = %s",
         (NOW, ids["case"]),
     )
-    row = submit_digits(conn, ids["case"], ONE_TIME_CODE, now=NOW + timedelta(seconds=1))
+    code = one_time_digits(ids["case"])
+    row = submit_digits(conn, ids["case"], code, now=NOW + timedelta(seconds=1))
     assert row["result"] == "wrong"
     assert row["events"][-1] == "code_did_not_match"
+    assert call_code(conn, ids["case"], now=NOW + timedelta(seconds=1)) is None
+
+
+def test_two_connections_derive_the_same_code(conn, database_url):
+    ids = seed(conn, app=True, push=False)
+    apply_case(conn, ids["case"], "start", now=NOW, rng=fixed_rng)
+    code = one_time_digits(ids["case"])
+    conn.commit()
+    first = _connect(database_url)
+    second = _connect(database_url)
+    try:
+        assert call_code(first, ids["case"], now=NOW) == code
+        assert call_code(second, ids["case"], now=NOW) == code
+        assert call_code(first, ids["case"], now=NOW) == call_code(second, ids["case"], now=NOW)
+    finally:
+        first.close()
+        second.close()
+        _delete_user_graph(database_url)
+
+
+def test_reissue_replaces_the_nonce_and_kills_the_old_code(conn, caplog):
+    ids = seed(conn, app=True, push=False)
+    apply_case(conn, ids["case"], "start", now=NOW, rng=fixed_rng)
+    old = one_time_digits(ids["case"])
+    later = NOW + timedelta(seconds=30)
+    row = reissue_one_time(conn, ids["case"], now=later, rng=lambda n: b"\x07" * n)
+    new = derive_one_time(ids["case"], b"\x07" * 16)
+    assert new != old
+    assert bytes(row["one_time_nonce"]) == b"\x07" * 16
+    assert row["one_time_code_hash"] == hash_one_time(new)
+    assert row["one_time_code_expires_at"] == later + timedelta(minutes=5)
+    assert row["one_time_code_used_at"] is None
+    assert row["state"] == "calling"
+    assert row["events"] == ["start"]
+    assert call_code(conn, ids["case"], now=later) == new
+    killed = submit_digits(conn, ids["case"], old, now=later + timedelta(seconds=1))
+    assert killed["result"] == "wrong"
+    assert killed["events"][-1] == "code_did_not_match"
+    assert old not in case_text(conn, ids["case"])
+    assert new not in case_text(conn, ids["case"])
+    assert old not in caplog.text
+    assert new not in caplog.text
+
+    fresh = seed(conn, app=True, push=False)
+    apply_case(conn, fresh["case"], "start", now=NOW, rng=fixed_rng)
+    previous = one_time_digits(fresh["case"])
+    reissue_one_time(
+        conn, fresh["case"], now=later, rng=lambda n: b"\x09" * n
+    )
+    current = derive_one_time(fresh["case"], b"\x09" * 16)
+    assert hash_one_time(previous) != load_case(conn, fresh["case"], now=later)["one_time_code_hash"]
+    accepted = submit_digits(conn, fresh["case"], current, now=later + timedelta(seconds=1))
+    assert accepted["state"] == "awaiting_answer"
+    assert accepted["one_time_code_used_at"] == later + timedelta(seconds=1)
+    assert call_code(conn, fresh["case"], now=later + timedelta(seconds=1)) is None
+
+
+def test_reissue_is_refused_when_the_call_is_not_asking_for_a_one_time_code(conn):
+    ids = seed(conn, app=False, push=False)
+    apply_case(conn, ids["case"], "start", now=NOW, rng=fixed_rng)
+    with pytest.raises(ValueError):
+        reissue_one_time(conn, ids["case"], now=NOW, rng=fixed_rng)
 
 
 def test_keypad_answer_before_the_code_records_nothing(conn):
