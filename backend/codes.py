@@ -185,6 +185,27 @@ def verify_one_time(code: str, stored: str) -> bool:
     return _consteq(hash_one_time(code), stored)
 
 
+def keyed_hash(domain: str, value: str) -> str:
+    """Lowercase hex HMAC-SHA256 of `domain` NUL `value`, keyed with CODE_PEPPER.
+
+    For secrets that have to be found by their hash: invite secrets and SMS
+    OTP challenges. The domain keeps those hashes apart from each other and
+    from `hash_one_time`, which hashes the bare 6 digits.
+    """
+    pepper = _pepper()
+    if not isinstance(domain, str) or domain == "" or "\x00" in domain:
+        raise ValueError("domain must be a non-empty str without NUL")
+    if not isinstance(value, str):
+        raise TypeError("value must be a str")
+    message = (domain + "\x00" + value).encode("utf-8")
+    return hmac.new(pepper.encode("utf-8"), message, hashlib.sha256).hexdigest()
+
+
+def keyed_hash_matches(domain: str, value: str, stored: object) -> bool:
+    """Constant-time compare of `keyed_hash(domain, value)` with `stored`."""
+    return _consteq(keyed_hash(domain, value), stored)
+
+
 def derive_one_time(case_id, nonce: bytes) -> str:
     """The 6 digits for this case and nonce.
 

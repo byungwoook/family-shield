@@ -12,7 +12,9 @@ code or a static salt has to be chosen. This module does not call
 nonce, and `call_code` derives the digits from that nonce.
 
 Session rows, the dev helper that marks a child callable, and one call
-attempt row are written here too. None of them commit.
+attempt row are written here too. Milestone 5 adds invites, SMS OTP
+challenges, parent confirm and reject, and family timeline rows. None of
+them commit.
 
 See tests/test_store.py for the readings this file locks in.
 """
@@ -68,6 +70,10 @@ _CASE_SQL = """
 
 class CaseNotFound(LookupError):
     """No case has this id."""
+
+
+class RateLimited(Exception):
+    """A per-member cap was reached. Nothing was written."""
 
 
 class PhoneInUse(Exception):
@@ -650,6 +656,324 @@ def record_call_attempt(conn, case_id: UUID, *, now: datetime) -> None:
     )
 
 
+def issue_invite(
+    conn,
+    member_id: UUID,
+    *,
+    invite_hash: str,
+    expires_at: datetime,
+) -> None:
+    """Store a new invite hash for an invited child nobody has claimed yet.
+
+    A second issue replaces the first, so an older secret stops working.
+    """
+    _require_aware(expires_at, "expires_at")
+    if not isinstance(invite_hash, str) or len(invite_hash) < 32:
+        raise ValueError("token_hash_too_short")
+    member = _one(
+        conn,
+        """
+        SELECT role, status, user_id
+        FROM family_members
+        WHERE id = %s
+        FOR UPDATE
+        """,
+        (member_id,),
+    )
+    if member is None:
+        raise CaseNotFound(str(member_id))
+    if (
+        member["role"] != "child"
+        or member["status"] != "invited"
+        or member["user_id"] is not None
+    ):
+        raise ValueError("invite_not_open")
+    _execute(
+        conn,
+        """
+        UPDATE family_members
+        SET invite_hash = %s, invite_expires_at = %s
+        WHERE id = %s
+        """,
+        (invite_hash, expires_at, member_id),
+    )
+
+
+def accept_invite(conn, *, invite_hash: str, user_id: UUID, now: datetime) -> dict:
+    """Link this user to the invited child row and burn the secret.
+
+    An unknown, used, or replaced secret is `invite_invalid`. A live row
+    past `invite_expires_at` is `invite_expired` and keeps its hash, so the
+    answer stays the same until the parent issues a new one. A user who
+    already holds a non-removed membership anywhere cannot accept.
+    """
+    _require_aware(now, "now")
+    row = _one(
+        conn,
+        """
+        SELECT id, family_id, role, status, user_id, display_name, invite_expires_at
+        FROM family_members
+        WHERE invite_hash = %s
+        FOR UPDATE
+        """,
+        (invite_hash,),
+    )
+    if (
+        row is None
+        or row["role"] != "child"
+        or row["status"] != "invited"
+        or row["user_id"] is not None
+    ):
+        raise ValueError("invite_invalid")
+    if now >= row["invite_expires_at"]:
+        raise ValueError("invite_expired")
+    _bind_child_user(conn, row["id"], user_id)
+    _execute(
+        conn,
+        """
+        UPDATE family_members
+        SET user_id = %s, invite_hash = NULL, invite_expires_at = NULL
+        WHERE id = %s
+        """,
+        (user_id, row["id"]),
+    )
+    add_family_event(
+        conn, row["family_id"], now=now, actor_user_id=user_id, step="invite_accepted"
+    )
+    return {
+        "id": row["id"],
+        "family_id": row["family_id"],
+        "display_name": row["display_name"],
+    }
+
+
+def child_membership(conn, user_id: UUID) -> dict | None:
+    """This user's one non-removed child row, with the columns enrollment reads."""
+    rows = _all(
+        conn,
+        """
+        SELECT id, family_id, status, phone_e164, phone_opted_in_at,
+               confirmed_by_parent_at
+        FROM family_members
+        WHERE user_id = %s AND role = 'child' AND status <> 'removed'
+        ORDER BY created_at ASC, id ASC
+        """,
+        (user_id,),
+    )
+    if len(rows) != 1:
+        return None
+    return rows[0]
+
+
+def start_phone_otp(
+    conn,
+    member_id: UUID,
+    phone_e164: str,
+    *,
+    code_hash: str,
+    now: datetime,
+    expires_at: datetime,
+    daily_limit: int,
+) -> None:
+    """Write one challenge and consume this member's older live ones.
+
+    The member row is locked first so two starts cannot both pass the cap.
+    The cap counts every challenge created in the last 24 hours, including
+    consumed ones. At the cap this raises RateLimited and writes nothing.
+    """
+    _require_aware(now, "now")
+    _require_aware(expires_at, "expires_at")
+    _require_e164(phone_e164)
+    _lock_member(conn, member_id)
+    row = _one(
+        conn,
+        """
+        SELECT count(*) AS n
+        FROM phone_otp
+        WHERE member_id = %s AND created_at > %s
+        """,
+        (member_id, now - timedelta(hours=24)),
+    )
+    if row["n"] >= daily_limit:
+        raise RateLimited("rate_limited")
+    _execute(
+        conn,
+        """
+        UPDATE phone_otp
+        SET consumed_at = %s
+        WHERE member_id = %s AND consumed_at IS NULL
+        """,
+        (now, member_id),
+    )
+    _execute(
+        conn,
+        """
+        INSERT INTO phone_otp (
+            member_id, phone_e164, code_hash, expires_at, attempts, created_at
+        ) VALUES (%s, %s, %s, %s, 0, %s)
+        """,
+        (member_id, phone_e164, code_hash, expires_at, now),
+    )
+
+
+def check_phone_otp(
+    conn,
+    member_id: UUID,
+    phone_e164: str,
+    *,
+    matches,
+    now: datetime,
+    max_attempts: int,
+) -> str:
+    """`ok`, `wrong`, or `dead`. The caller commits on every outcome.
+
+    `matches(stored_hash) -> bool` is the comparison, so this module never
+    sees the digits. Only the newest live challenge for this member and
+    this number counts. A miss increments `attempts`; the miss that reaches
+    `max_attempts` also consumes the challenge, so the right code after that
+    is `dead`. Expired, consumed, or missing is `dead` too.
+    """
+    _require_aware(now, "now")
+    row = _one(
+        conn,
+        """
+        SELECT id, code_hash, expires_at, attempts
+        FROM phone_otp
+        WHERE member_id = %s AND phone_e164 = %s AND consumed_at IS NULL
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+        FOR UPDATE
+        """,
+        (member_id, phone_e164),
+    )
+    if row is None or now >= row["expires_at"] or row["attempts"] >= max_attempts:
+        return "dead"
+    if matches(row["code_hash"]):
+        _execute(
+            conn,
+            "UPDATE phone_otp SET consumed_at = %s WHERE id = %s",
+            (now, row["id"]),
+        )
+        return "ok"
+    attempts = row["attempts"] + 1
+    _execute(
+        conn,
+        """
+        UPDATE phone_otp
+        SET attempts = %s,
+            consumed_at = CASE WHEN %s >= %s THEN %s ELSE consumed_at END
+        WHERE id = %s
+        """,
+        (attempts, attempts, max_attempts, now, row["id"]),
+    )
+    return "wrong"
+
+
+def confirm_member(conn, member_id: UUID, *, now: datetime, actor_user_id: UUID) -> dict:
+    """Parent confirm: the child becomes callable and the 24-hour clock starts.
+
+    Allowed only for an invited child that accepted the invite and proved a
+    number with OTP. Anything else is `member_not_ready`.
+    """
+    _require_aware(now, "now")
+    member = _lock_pending_child(conn, member_id)
+    if member["user_id"] is None or member["phone_opted_in_at"] is None:
+        raise ValueError("member_not_ready")
+    _execute(
+        conn,
+        """
+        UPDATE family_members
+        SET status = 'active',
+            confirmed_by_parent_at = %s,
+            phone_current_since = %s
+        WHERE id = %s
+        """,
+        (now, now, member_id),
+    )
+    add_family_event(
+        conn, member["family_id"], now=now, actor_user_id=actor_user_id, step="child_confirmed"
+    )
+    return member_contact(conn, member_id)
+
+
+def reject_member(conn, member_id: UUID, *, now: datetime, actor_user_id: UUID) -> None:
+    """Parent reject: the row is removed and its invite and number are freed."""
+    _require_aware(now, "now")
+    member = _lock_pending_child(conn, member_id)
+    _execute(
+        conn,
+        """
+        UPDATE family_members
+        SET status = 'removed', invite_hash = NULL, invite_expires_at = NULL
+        WHERE id = %s
+        """,
+        (member_id,),
+    )
+    add_family_event(
+        conn, member["family_id"], now=now, actor_user_id=actor_user_id, step="child_rejected"
+    )
+
+
+def family_roster(conn, family_id: UUID) -> list:
+    """Non-removed members for the parent screen. No hashes and no full number."""
+    rows = _all(
+        conn,
+        """
+        SELECT id, role, display_name, status, user_id, phone_e164,
+               phone_opted_in_at, confirmed_by_parent_at, code_set_at,
+               invite_expires_at
+        FROM family_members
+        WHERE family_id = %s AND status <> 'removed'
+        ORDER BY created_at ASC, id ASC
+        """,
+        (family_id,),
+    )
+    out = []
+    for row in rows:
+        phone = row["phone_e164"]
+        out.append(
+            {
+                "id": row["id"],
+                "role": row["role"],
+                "display_name": row["display_name"],
+                "status": row["status"],
+                "linked": row["user_id"] is not None,
+                "phone_last4": phone[-4:] if isinstance(phone, str) else None,
+                "phone_verified": row["phone_opted_in_at"] is not None,
+                "has_check_code": row["code_set_at"] is not None,
+                "awaiting_confirm": (
+                    row["role"] == "child"
+                    and row["status"] == "invited"
+                    and row["user_id"] is not None
+                    and row["phone_opted_in_at"] is not None
+                ),
+                "invite_expires_at": row["invite_expires_at"],
+                "confirmed_at": row["confirmed_by_parent_at"],
+            }
+        )
+    return out
+
+
+def add_family_event(
+    conn,
+    family_id: UUID,
+    *,
+    now: datetime,
+    actor_user_id: UUID | None,
+    step: str,
+) -> None:
+    """One family timeline row. The step is an id, never a code or a number."""
+    _require_aware(now, "now")
+    _execute(
+        conn,
+        """
+        INSERT INTO family_events (family_id, at, actor_user_id, step)
+        VALUES (%s, %s, %s, %s)
+        """,
+        (family_id, now, actor_user_id, step),
+    )
+
+
 def call_code(conn, case_id: UUID, *, now: datetime) -> str | None:
     """Digits derived from the stored nonce, or None when none can be shown.
 
@@ -892,6 +1216,24 @@ def _user_id(conn, auth_provider: str, auth_subject: str) -> UUID | None:
     if row is None:
         return None
     return row["id"]
+
+
+def _lock_pending_child(conn, member_id: UUID) -> dict:
+    row = _one(
+        conn,
+        """
+        SELECT id, family_id, role, status, user_id, phone_opted_in_at
+        FROM family_members
+        WHERE id = %s
+        FOR UPDATE
+        """,
+        (member_id,),
+    )
+    if row is None or row["role"] != "child":
+        raise CaseNotFound(str(member_id))
+    if row["status"] != "invited":
+        raise ValueError("member_not_pending")
+    return row
 
 
 def _lock_member(conn, member_id: UUID) -> dict:

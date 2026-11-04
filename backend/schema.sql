@@ -1,4 +1,4 @@
--- Family Shield product schema (milestone 3).
+-- Family Shield product schema (milestones 3 and 5).
 -- Postgres 13 or newer (gen_random_uuid, timestamptz). There is no SQLite schema.
 --
 -- Local test database, from docker-compose.yml:
@@ -161,6 +161,11 @@ CREATE UNIQUE INDEX family_members_phone_e164_active
 CREATE UNIQUE INDEX family_members_pending_phone_active
     ON family_members (pending_phone_e164)
     WHERE status <> 'removed' AND pending_phone_e164 IS NOT NULL;
+
+-- An invite is found by its hash (milestone 5), so two live rows cannot share one.
+CREATE UNIQUE INDEX family_members_invite_hash_key
+    ON family_members (invite_hash)
+    WHERE invite_hash IS NOT NULL;
 
 CREATE INDEX family_members_family_id_status_idx
     ON family_members (family_id, status);
@@ -334,13 +339,19 @@ CREATE TABLE family_events (
 CREATE INDEX family_events_family_id_at_idx
     ON family_events (family_id, at);
 
+-- One SMS OTP challenge (milestone 5). It belongs to the membership that
+-- asked for it, so another account cannot finish it. A new challenge for
+-- the same member consumes the older ones, and created_at is what the
+-- daily send cap counts. code_hash is HMAC(CODE_PEPPER, phone:code).
 CREATE TABLE phone_otp (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    member_id uuid NOT NULL REFERENCES family_members (id),
     phone_e164 text NOT NULL,
     code_hash text NOT NULL,
     expires_at timestamptz NOT NULL,
     attempts integer NOT NULL DEFAULT 0,
     consumed_at timestamptz,
+    created_at timestamptz NOT NULL,
     CONSTRAINT phone_otp_phone_format CHECK (phone_e164 ~ '^\+[1-9][0-9]{1,14}$'),
     CONSTRAINT phone_otp_code_hash_not_plaintext CHECK (
         length(code_hash) >= 32 AND code_hash !~ '^[0-9]{6}$'
@@ -350,6 +361,9 @@ CREATE TABLE phone_otp (
 
 CREATE INDEX phone_otp_phone_e164_idx
     ON phone_otp (phone_e164);
+
+CREATE INDEX phone_otp_member_id_created_at_idx
+    ON phone_otp (member_id, created_at);
 
 CREATE INDEX sessions_user_id_idx
     ON sessions (user_id);

@@ -160,11 +160,13 @@ TABLES = {
     "family_events": {"id", "family_id", "at", "actor_user_id", "step"},
     "phone_otp": {
         "id",
+        "member_id",
         "phone_e164",
         "code_hash",
         "expires_at",
         "attempts",
         "consumed_at",
+        "created_at",
     },
 }
 
@@ -193,6 +195,7 @@ TIMESTAMPTZ = {
     ("family_events", "at"),
     ("phone_otp", "expires_at"),
     ("phone_otp", "consumed_at"),
+    ("phone_otp", "created_at"),
 }
 
 FORBIDDEN_COLUMNS = {
@@ -671,10 +674,10 @@ def test_plaintext_codes_do_not_fit_the_hash_columns(conn):
     assert_rejected(
         conn,
         """
-        INSERT INTO phone_otp (phone_e164, code_hash, expires_at)
-        VALUES (%s, '123456', %s)
+        INSERT INTO phone_otp (member_id, phone_e164, code_hash, expires_at, created_at)
+        VALUES (%s, %s, '123456', %s, %s)
         """,
-        (ids["phone"], NOW),
+        (ids["member"], ids["phone"], NOW, NOW),
     )
 
 
@@ -1764,10 +1767,10 @@ def test_family_event_and_attempt_rows_round_trip(conn):
     )
     conn.execute(
         """
-        INSERT INTO phone_otp (phone_e164, code_hash, expires_at)
-        VALUES (%s, %s, %s)
+        INSERT INTO phone_otp (member_id, phone_e164, code_hash, expires_at, created_at)
+        VALUES (%s, %s, %s, %s, %s)
         """,
-        (next_phone(), "a" * 64, NOW),
+        (ids["member"], next_phone(), "a" * 64, NOW, NOW),
     )
     step = conn.execute(
         "SELECT step FROM family_events WHERE family_id = %s",

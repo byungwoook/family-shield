@@ -11,8 +11,13 @@ store does not. A call is recorded only after that commit, as the string
 "would call {e164}". Nothing is dialed.
 
 `boot` refuses to start when `ENV=production` and `DEV_AUTH=1`. The dev
-login and the helpers that skip SMS exist only in that mode. Apple,
-Google, invite secrets, and SMS OTP are later milestones.
+login and the helpers that skip SMS exist only in that mode.
+
+Milestone 5 adds Apple and Google sign-in (`backend.signin`), invite
+secrets, SMS OTP for +1 and +82 (`backend.enroll`), and the parent's
+confirm or reject. Outside DEV_AUTH=1, boot requires both sign-in
+audiences and a Twilio sender, so `DevOtp` cannot be the production path.
+The SMS, like the call, is sent only after the commit.
 
 `GET /v1/cases/{id}` is an allowlist. It has no code, no nonce, no hash,
 and no full phone number. `phone_last4` is the only phone fragment, for
@@ -39,15 +44,40 @@ from backend.codes import (
     CodeConfigError,
     DerivationKeyError,
 )
+from backend.enroll import (
+    INVITE_TTL,
+    OTP_MAX_ATTEMPTS,
+    OTP_SENDS_PER_DAY,
+    OTP_TTL,
+    DevOtp,
+    TwilioOtp,
+    format_invite,
+    hash_invite,
+    hash_otp,
+    new_invite_secret,
+    new_otp_code,
+    normalize_invite,
+    otp_matches,
+)
+from backend.signin import InvalidIdToken, apple_verifier, google_verifier
 from backend.store import (
     CaseNotFound,
     PhoneInUse,
+    RateLimited,
+    accept_invite,
     active_parent,
+    add_family_event,
     add_member,
     apply_case,
+    check_phone_otp,
+    child_membership,
+    complete_phone_otp,
+    confirm_member,
     create_family,
     create_session,
     ensure_user,
+    family_roster,
+    issue_invite,
     load_case,
     lock_case,
     mark_member_callable,
@@ -55,8 +85,10 @@ from backend.store import (
     memberships_for_user,
     open_case,
     record_call_attempt,
+    reject_member,
     session_user,
     set_check_code,
+    start_phone_otp,
     submit_digits,
 )
 from services.code_webhook import _digits
@@ -88,6 +120,11 @@ _VALUE_ERRORS = {
     "check code is child only": (403, "not_a_child"),
     "static check code must be 4 digits": (400, "invalid_code"),
     "token_hash_too_short": (500, "config"),
+    "invite_invalid": (400, "invite_invalid"),
+    "invite_expired": (400, "invite_expired"),
+    "invite_not_open": (409, "invite_not_open"),
+    "member_not_ready": (409, "member_not_ready"),
+    "member_not_pending": (409, "member_not_pending"),
 }
 
 
@@ -144,6 +181,34 @@ class AnswerIn(BaseModel):
 class DigitsIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     digits: str = Field(max_length=_DIGITS_LIMIT)
+
+
+class SignInIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id_token: str = Field(max_length=8192)
+    locale: str
+    display_name: str | None = Field(default=None, max_length=_NAME_LIMIT)
+
+
+class InviteAcceptIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    secret: str = Field(max_length=64)
+
+
+class OtpStartIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    phone_e164: str = Field(max_length=16)
+
+
+class OtpCheckIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    phone_e164: str = Field(max_length=16)
+    code: str = Field(max_length=16)
+
+
+class DecisionIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    decision: str = Field(max_length=16)
 
 
 class DevLoginIn(BaseModel):
@@ -312,6 +377,11 @@ def boot(environ: Mapping[str, str] | None = None) -> FastAPI:
     `DEV_AUTH` is on only when the value is exactly `1`. That flag cannot
     be combined with `ENV=production`. `CODE_WEBHOOK_SECRET` belongs to the
     hackathon webhook, not to this process.
+
+    With DEV_AUTH=1, SMS goes to `DevOtp` and a blank sign-in audience
+    leaves that route answering `sign_in_unavailable`. Without it,
+    APPLE_BUNDLE_ID, GOOGLE_SERVER_CLIENT_ID, and the Twilio settings are
+    required and a missing one refuses to boot.
     """
     env = os.environ if environ is None else environ
 
@@ -330,6 +400,21 @@ def boot(environ: Mapping[str, str] | None = None) -> FastAPI:
         raise RuntimeError("CODE_PEPPER is required")
     if get("OTP_DERIVATION_KEY") == "":
         raise RuntimeError("OTP_DERIVATION_KEY is required")
+    dev_auth = get("DEV_AUTH") == "1"
+    apple_audience = get("APPLE_BUNDLE_ID")
+    google_audience = get("GOOGLE_SERVER_CLIENT_ID")
+    if not dev_auth:
+        for name, value in (
+            ("APPLE_BUNDLE_ID", apple_audience),
+            ("GOOGLE_SERVER_CLIENT_ID", google_audience),
+        ):
+            if value == "":
+                raise RuntimeError(f"{name} is required")
+    otp_sender = DevOtp() if dev_auth else TwilioOtp.from_env(env)
+    verifiers = {
+        "apple": apple_verifier(apple_audience) if apple_audience else None,
+        "google": google_verifier(google_audience) if google_audience else None,
+    }
 
     def connect():
         import psycopg
@@ -342,7 +427,9 @@ def boot(environ: Mapping[str, str] | None = None) -> FastAPI:
         rng=default_rng,
         tokens=default_token,
         call_provider=RecordingCallProvider(),
-        dev_auth=get("DEV_AUTH") == "1",
+        dev_auth=dev_auth,
+        verifiers=verifiers,
+        otp_sender=otp_sender,
     )
 
 
@@ -354,9 +441,21 @@ def create_app(
     tokens: Callable[[], str],
     call_provider,
     dev_auth: bool,
+    verifiers: Mapping | None = None,
+    otp_sender=None,
+    invite_secrets: Callable[[], str] = new_invite_secret,
+    otp_codes: Callable[[], str] = new_otp_code,
 ) -> FastAPI:
-    """Routes for one product process. Dependencies are injected."""
+    """Routes for one product process. Dependencies are injected.
+
+    `verifiers` maps `apple` / `google` to an `IdTokenVerifier` or None.
+    `otp_sender.send(phone, code)` runs after the commit. When it is None
+    the OTP routes answer `otp_unavailable` and write nothing.
+    """
+    verifiers = dict(verifiers or {})
     app = FastAPI(title="Family Shield")
+    # Read by tests to check which sender boot chose. Not used by a route.
+    app.state.otp_sender = otp_sender
 
     @app.exception_handler(RequestValidationError)
     async def _invalid_body(_request: Request, _exc: RequestValidationError):
@@ -385,6 +484,10 @@ def create_app(
             return _fail(404, "not_found")
         except PhoneInUse:
             return _fail(409, "phone_in_use")
+        except RateLimited:
+            return _fail(429, "rate_limited")
+        except InvalidIdToken:
+            return _fail(401, "invalid_token")
         except BiometricRequired:
             return _fail(403, "biometric_required")
         except UnsupportedCountry:
@@ -517,6 +620,252 @@ def create_app(
     ):
         return _run(lambda conn: _answer(conn, authorization, case_id, body))
 
+    @app.post("/v1/auth/apple")
+    def auth_apple(body: SignInIn):
+        if verifiers.get("apple") is None:
+            return _fail(503, "sign_in_unavailable")
+        return _run(lambda conn: _sign_in(conn, "apple", body))
+
+    @app.post("/v1/auth/google")
+    def auth_google(body: SignInIn):
+        if verifiers.get("google") is None:
+            return _fail(503, "sign_in_unavailable")
+        return _run(lambda conn: _sign_in(conn, "google", body))
+
+    @app.get("/v1/families/{family_id}/members")
+    def get_members(family_id: str, authorization: str | None = Header(default=None)):
+        return _run(lambda conn: _roster(conn, authorization, family_id))
+
+    @app.post("/v1/families/{family_id}/members/{member_id}/invite")
+    def post_invite(
+        family_id: str,
+        member_id: str,
+        authorization: str | None = Header(default=None),
+    ):
+        result = _run(lambda conn: _reissue(conn, authorization, family_id, member_id))
+        return _created(result)
+
+    @app.post("/v1/families/{family_id}/members/{member_id}/confirm")
+    def post_confirm(
+        family_id: str,
+        member_id: str,
+        body: DecisionIn,
+        authorization: str | None = Header(default=None),
+    ):
+        return _run(
+            lambda conn: _decide(conn, authorization, family_id, member_id, body)
+        )
+
+    @app.post("/v1/invites/accept")
+    def post_accept(body: InviteAcceptIn, authorization: str | None = Header(default=None)):
+        return _run(lambda conn: _accept(conn, authorization, body))
+
+    @app.post("/v1/phones/otp")
+    def post_otp(body: OtpStartIn, authorization: str | None = Header(default=None)):
+        if otp_sender is None:
+            return _fail(503, "otp_unavailable")
+        result = _run(lambda conn: _otp_start(conn, authorization, body))
+        if isinstance(result, JSONResponse):
+            return result
+        payload, phone, code = result
+        try:
+            otp_sender.send(phone, code)
+        except Exception as exc:
+            log.error("otp sender failed: %s", type(exc).__name__)
+            return _fail(502, "sms_failed")
+        return JSONResponse(payload, status_code=202)
+
+    @app.post("/v1/phones/otp/check")
+    def post_otp_check(body: OtpCheckIn, authorization: str | None = Header(default=None)):
+        if otp_sender is None:
+            return _fail(503, "otp_unavailable")
+        return _run(lambda conn: _otp_check(conn, authorization, body))
+
+    def _new_session(conn, user_id, now) -> str:
+        token = tokens()
+        if not isinstance(token, str) or len(token) < 32 or token.strip() != token:
+            raise APIError(500, "config")
+        digest = hash_token(token)
+        if digest == token:
+            raise APIError(500, "config")
+        create_session(
+            conn,
+            user_id=user_id,
+            token_hash=digest,
+            expires_at=now + SESSION_TTL,
+        )
+        return token
+
+    def _sign_in(conn, provider: str, body: SignInIn) -> dict:
+        verifier = verifiers.get(provider)
+        if verifier is None:
+            raise APIError(503, "sign_in_unavailable")
+        if body.locale not in ("en", "ko"):
+            raise APIError(400, "invalid_body")
+        now = _now()
+        identity = verifier.verify(body.id_token, now=now)
+        name = "" if body.display_name is None else body.display_name.strip()
+        user_id = ensure_user(
+            conn,
+            auth_provider=identity.provider,
+            auth_subject=identity.subject,
+            display_name=name,
+            locale=body.locale,
+            now=now,
+        )
+        token = _new_session(conn, user_id, now)
+        return {"token": token, "user_id": str(user_id)}
+
+    def _new_invite(conn, member_id, family_id, actor, now, step) -> dict:
+        secret = invite_secrets()
+        if normalize_invite(secret) != secret:
+            raise APIError(500, "config")
+        expires_at = now + INVITE_TTL
+        issue_invite(
+            conn, member_id, invite_hash=hash_invite(secret), expires_at=expires_at
+        )
+        add_family_event(conn, family_id, now=now, actor_user_id=actor, step=step)
+        return {
+            "invite_secret": format_invite(secret),
+            "invite_expires_at": _iso(expires_at),
+        }
+
+    def _family_child(conn, user_id, family_id: str, member_id: str) -> dict:
+        family = _uuid(family_id)
+        if active_parent(conn, user_id, family) is None:
+            raise APIError(404, "not_found")
+        member = member_contact(conn, _uuid(member_id))
+        if (
+            member is None
+            or member["family_id"] != family
+            or member.get("role") != "child"
+            or member.get("status") == "removed"
+        ):
+            raise APIError(404, "not_found")
+        return member
+
+    def _roster(conn, authorization, family_id: str) -> dict:
+        user = _user(conn, authorization)
+        family = _uuid(family_id)
+        if active_parent(conn, user["user_id"], family) is None:
+            raise APIError(404, "not_found")
+        members = []
+        for row in family_roster(conn, family):
+            members.append(
+                {
+                    **row,
+                    "id": str(row["id"]),
+                    "invite_expires_at": _iso(row["invite_expires_at"]),
+                    "confirmed_at": _iso(row["confirmed_at"]),
+                }
+            )
+        return {"family_id": str(family), "members": members}
+
+    def _reissue(conn, authorization, family_id: str, member_id: str) -> dict:
+        now = _now()
+        user = _user(conn, authorization)
+        member = _family_child(conn, user["user_id"], family_id, member_id)
+        invite = _new_invite(
+            conn, member["id"], member["family_id"], user["user_id"], now, "invite_reissued"
+        )
+        return {"id": str(member["id"]), **invite}
+
+    def _decide(conn, authorization, family_id: str, member_id: str, body: DecisionIn):
+        now = _now()
+        user = _user(conn, authorization)
+        if body.decision not in ("confirm", "reject"):
+            raise APIError(400, "invalid_body")
+        member = _family_child(conn, user["user_id"], family_id, member_id)
+        if body.decision == "reject":
+            reject_member(conn, member["id"], now=now, actor_user_id=user["user_id"])
+            return {"id": str(member["id"]), "status": "removed"}
+        fresh = confirm_member(conn, member["id"], now=now, actor_user_id=user["user_id"])
+        phone = fresh.get("phone_e164")
+        return {
+            "id": str(member["id"]),
+            "status": "active",
+            "phone_last4": phone[-4:] if isinstance(phone, str) else None,
+        }
+
+    def _accept(conn, authorization, body: InviteAcceptIn) -> dict:
+        now = _now()
+        user = _user(conn, authorization)
+        secret = normalize_invite(body.secret)
+        if secret is None:
+            raise APIError(400, "invite_invalid")
+        member = accept_invite(
+            conn, invite_hash=hash_invite(secret), user_id=user["user_id"], now=now
+        )
+        return {
+            "member_id": str(member["id"]),
+            "family_id": str(member["family_id"]),
+            "display_name": member["display_name"],
+            "status": "invited",
+        }
+
+    def _enrolling_child(conn, user_id) -> dict:
+        member = child_membership(conn, user_id)
+        if member is None:
+            raise APIError(403, "not_a_child")
+        return member
+
+    def _otp_start(conn, authorization, body: OtpStartIn):
+        now = _now()
+        user = _user(conn, authorization)
+        member = _enrolling_child(conn, user["user_id"])
+        if member["status"] != "invited" or member["phone_e164"] is not None:
+            raise APIError(409, "phone_already_set")
+        phone = body.phone_e164
+        phone_region(phone)
+        code = otp_codes()
+        expires_at = now + OTP_TTL
+        start_phone_otp(
+            conn,
+            member["id"],
+            phone,
+            code_hash=hash_otp(phone, code),
+            now=now,
+            expires_at=expires_at,
+            daily_limit=OTP_SENDS_PER_DAY,
+        )
+        payload = {
+            "status": "sent",
+            "phone_last4": phone[-4:],
+            "expires_at": _iso(expires_at),
+        }
+        return payload, phone, code
+
+    def _otp_check(conn, authorization, body: OtpCheckIn):
+        now = _now()
+        user = _user(conn, authorization)
+        member = _enrolling_child(conn, user["user_id"])
+        phone = body.phone_e164
+        phone_region(phone)
+        if member["phone_e164"] is not None:
+            raise APIError(409, "phone_already_set")
+        outcome = check_phone_otp(
+            conn,
+            member["id"],
+            phone,
+            matches=lambda stored: otp_matches(phone, body.code, stored),
+            now=now,
+            max_attempts=OTP_MAX_ATTEMPTS,
+        )
+        # A miss is committed: the attempt count is the brute-force guard.
+        if outcome == "dead":
+            return _fail(400, "otp_expired")
+        if outcome == "wrong":
+            return _fail(400, "otp_wrong")
+        complete_phone_otp(conn, member["id"], phone, now=now)
+        add_family_event(
+            conn,
+            member["family_id"],
+            now=now,
+            actor_user_id=user["user_id"],
+            step="phone_verified",
+        )
+        return {"status": "verified", "phone_last4": phone[-4:]}
+
     def _dev_login(conn, body: DevLoginIn) -> dict:
         now = _now()
         name = _required_name(body.display_name)
@@ -536,18 +885,7 @@ def create_app(
             locale=body.locale,
             now=now,
         )
-        token = tokens()
-        if not isinstance(token, str) or len(token) < 32 or token.strip() != token:
-            raise APIError(500, "config")
-        digest = hash_token(token)
-        if digest == token:
-            raise APIError(500, "config")
-        create_session(
-            conn,
-            user_id=user_id,
-            token_hash=digest,
-            expires_at=now + SESSION_TTL,
-        )
+        token = _new_session(conn, user_id, now)
         return {
             "token": token,
             "user_id": str(user_id),
@@ -592,10 +930,12 @@ def create_app(
             now=now,
             status="invited",
         )
+        invite = _new_invite(conn, member_id, family, user["user_id"], now, "child_invited")
         return {
             "id": str(member_id),
             "display_name": name,
             "status": "invited",
+            **invite,
         }
 
     def _activate(conn, authorization, member_id: str, body: ActivateIn) -> dict:

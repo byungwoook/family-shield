@@ -9,8 +9,9 @@ Readings, where the milestone text allows more than one:
 - Dev login stores `auth_provider = apple` because the schema allows only
   apple and google. The subject is `dev-...` unless the caller passes one.
   It is not an Apple identity token. Milestone 5 replaces this route.
-- Invite secrets and SMS OTP are milestone 5. Adding a child creates an
-  invited row and returns no secret. `POST /v1/dev/members/{id}/activate`
+- Invite secrets and SMS OTP are milestone 5 (tests/test_enroll.py).
+  Adding a child creates an invited row and, since milestone 5, returns
+  the invite secret once. `POST /v1/dev/members/{id}/activate`
   exists only when DEV_AUTH=1. It sets opt-in, `phone_current_since`, and
   parent confirmation to the injected clock, and it does not send SMS.
 - A call-channel yes is green only once that clock is 24 hours old. The
@@ -254,7 +255,7 @@ def _child(client, token, family_id, name="민지") -> str:
     body = response.json()
     assert body["status"] == "invited"
     assert body["display_name"] == name
-    assert "secret" not in body
+    assert len(body["invite_secret"]) == 14
     return body["id"]
 
 
@@ -491,6 +492,15 @@ def test_boot_refuses_a_missing_secret(missing):
         boot(env)
 
 
+PRODUCTION_SIGN_IN = {
+    "APPLE_BUNDLE_ID": "com.example.familyshield",
+    "GOOGLE_SERVER_CLIENT_ID": "example.apps.googleusercontent.com",
+    "TWILIO_ACCOUNT_SID": "AC" + "0" * 32,
+    "TWILIO_AUTH_TOKEN": "token",
+    "TWILIO_FROM_NUMBER": "+14155550100",
+}
+
+
 def test_boot_leaves_dev_routes_out_of_production():
     app = boot(
         {
@@ -499,6 +509,7 @@ def test_boot_leaves_dev_routes_out_of_production():
             "DATABASE_URL": "postgresql://example",
             "CODE_PEPPER": "pepper",
             "OTP_DERIVATION_KEY": "key",
+            **PRODUCTION_SIGN_IN,
         }
     )
     paths = {getattr(route, "path", "") for route in app.routes}
@@ -517,6 +528,7 @@ def test_dev_auth_must_be_exactly_one():
             "DATABASE_URL": "postgresql://example",
             "CODE_PEPPER": "pepper",
             "OTP_DERIVATION_KEY": "key",
+            **PRODUCTION_SIGN_IN,
         }
     )
     paths = {getattr(route, "path", "") for route in app.routes}
@@ -1114,12 +1126,13 @@ def test_a_locked_static_code_does_not_dial(world):
 
 def test_a_missing_pepper_does_not_log_or_return_the_code(world, monkeypatch, caplog):
     client, _clock, _provider, _conn = world
-    monkeypatch.delenv("CODE_PEPPER", raising=False)
     parent = login(client, "Parent")
     family_id = _family(client, parent["token"])
+    # Adding a child hashes its invite with the pepper, so remove it after setup.
     member_id = _child(client, parent["token"], family_id)
     phone = next_phone()
     assert _activate(client, parent["token"], member_id, phone).status_code == 201
+    monkeypatch.delenv("CODE_PEPPER", raising=False)
     caplog.set_level(logging.DEBUG)
     response = _set_dev_code(client, parent["token"], member_id, "1357")
     assert response.status_code == 500
