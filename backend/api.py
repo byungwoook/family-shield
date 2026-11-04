@@ -19,6 +19,14 @@ confirm or reject. Outside DEV_AUTH=1, boot requires both sign-in
 audiences and a Twilio sender, so `DevOtp` cannot be the production path.
 The SMS, like the call, is sent only after the commit.
 
+Milestone 6 adds the Twilio keypad call (`backend.calls`): the call is
+placed after the commit, and its CallSid or its failure is written in a
+second transaction. `/voice/twilio/*` checks `X-Twilio-Signature` against
+PUBLIC_BASE_URL plus the path and query, and the CallSid against the
+attempt stored for that case. A webhook that fails either check changes
+nothing. Digits are never logged. `GET /v1/cases/{id}/call-code` shows
+the one-time code to the child's session only.
+
 `GET /v1/cases/{id}` is an allowlist. It has no code, no nonce, no hash,
 and no full phone number. `phone_last4` is the only phone fragment, for
 both the parent and the child. The call-code route is a later milestone.
@@ -32,12 +40,26 @@ import secrets
 from collections.abc import Callable, Mapping
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from urllib.parse import parse_qsl
 from uuid import UUID, uuid4
 
 from fastapi import FastAPI, Header, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
+from starlette.concurrency import run_in_threadpool
+
+from backend.calls import (
+    PROMPTS_DIR,
+    TwilioCalls,
+    Voice,
+    call_language,
+    hang_up,
+    missing_prompts,
+    prompt_path,
+    valid_signature,
+)
 
 from backend.codes import (
     BiometricRequired,
@@ -66,6 +88,8 @@ from backend.store import (
     RateLimited,
     accept_invite,
     active_parent,
+    call_attempt,
+    call_code,
     add_family_event,
     add_member,
     apply_case,
@@ -75,8 +99,10 @@ from backend.store import (
     confirm_member,
     create_family,
     create_session,
+    end_call_attempt,
     ensure_user,
     family_roster,
+    finish_call_attempt,
     issue_invite,
     load_case,
     lock_case,
@@ -219,15 +245,19 @@ class DevLoginIn(BaseModel):
 
 
 class RecordingCallProvider:
-    """Records `would call {e164}`. Does not open a socket."""
+    """Records `would call {e164}`. Does not open a socket.
+
+    Returns no CallSid, so no Twilio webhook can ever match its attempt.
+    """
 
     def __init__(self) -> None:
         self.calls: list[str] = []
 
-    def place(self, phone_e164: str) -> None:
+    def place(self, phone_e164: str, *, case_id=None) -> None:
         if not isinstance(phone_e164, str) or phone_e164 == "":
             raise ValueError("phone_e164 is required")
         self.calls.append(f"would call {phone_e164}")
+        return None
 
 
 def default_clock() -> datetime:
@@ -382,6 +412,13 @@ def boot(environ: Mapping[str, str] | None = None) -> FastAPI:
     leaves that route answering `sign_in_unavailable`. Without it,
     APPLE_BUNDLE_ID, GOOGLE_SERVER_CLIENT_ID, and the Twilio settings are
     required and a missing one refuses to boot.
+
+    Calls: with TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER,
+    and PUBLIC_BASE_URL all set, calls go to Twilio and the voice routes
+    exist. With DEV_AUTH=1 and any of them blank, calls are only recorded.
+    Without DEV_AUTH=1 all four are required, and so are the twelve prompt
+    files under PROMPTS_DIR (default backend/prompts): a call that plays
+    nothing must not reach a child.
     """
     env = os.environ if environ is None else environ
 
@@ -411,6 +448,40 @@ def boot(environ: Mapping[str, str] | None = None) -> FastAPI:
             if value == "":
                 raise RuntimeError(f"{name} is required")
     otp_sender = DevOtp() if dev_auth else TwilioOtp.from_env(env)
+    prompts_dir = Path(get("PROMPTS_DIR")) if get("PROMPTS_DIR") else PROMPTS_DIR
+    voice_settings = {
+        name: get(name)
+        for name in (
+            "TWILIO_ACCOUNT_SID",
+            "TWILIO_AUTH_TOKEN",
+            "TWILIO_FROM_NUMBER",
+            "PUBLIC_BASE_URL",
+        )
+    }
+    if not dev_auth:
+        for name, value in voice_settings.items():
+            if value == "":
+                raise RuntimeError(f"{name} is required")
+        missing = missing_prompts(prompts_dir)
+        if missing:
+            raise RuntimeError(
+                f"{len(missing)} voice prompt files are missing; "
+                "run: python -m scripts.render_prompts"
+            )
+    voice = None
+    twilio_token = ""
+    call_provider = RecordingCallProvider()
+    if all(voice_settings.values()):
+        voice = Voice(voice_settings["PUBLIC_BASE_URL"])
+        twilio_token = voice_settings["TWILIO_AUTH_TOKEN"]
+        call_provider = TwilioCalls(
+            account_sid=voice_settings["TWILIO_ACCOUNT_SID"],
+            auth_token=twilio_token,
+            from_number=voice_settings["TWILIO_FROM_NUMBER"],
+            voice=voice,
+        )
+        if missing_prompts(prompts_dir):
+            log.warning("voice prompt files are missing; calls will play nothing")
     verifiers = {
         "apple": apple_verifier(apple_audience) if apple_audience else None,
         "google": google_verifier(google_audience) if google_audience else None,
@@ -426,10 +497,13 @@ def boot(environ: Mapping[str, str] | None = None) -> FastAPI:
         clock=default_clock,
         rng=default_rng,
         tokens=default_token,
-        call_provider=RecordingCallProvider(),
+        call_provider=call_provider,
         dev_auth=dev_auth,
         verifiers=verifiers,
         otp_sender=otp_sender,
+        voice=voice,
+        twilio_auth_token=twilio_token,
+        prompts_dir=prompts_dir,
     )
 
 
@@ -445,17 +519,23 @@ def create_app(
     otp_sender=None,
     invite_secrets: Callable[[], str] = new_invite_secret,
     otp_codes: Callable[[], str] = new_otp_code,
+    voice: Voice | None = None,
+    twilio_auth_token: str = "",
+    prompts_dir: Path = PROMPTS_DIR,
 ) -> FastAPI:
     """Routes for one product process. Dependencies are injected.
 
     `verifiers` maps `apple` / `google` to an `IdTokenVerifier` or None.
     `otp_sender.send(phone, code)` runs after the commit. When it is None
     the OTP routes answer `otp_unavailable` and write nothing.
+    `voice` and `twilio_auth_token` together turn on `/voice/*`. Without
+    both, there are no voice routes and no webhook can move a case.
     """
     verifiers = dict(verifiers or {})
     app = FastAPI(title="Family Shield")
     # Read by tests to check which sender boot chose. Not used by a route.
     app.state.otp_sender = otp_sender
+    app.state.call_provider = call_provider
 
     @app.exception_handler(RequestValidationError)
     async def _invalid_body(_request: Request, _exc: RequestValidationError):
@@ -600,13 +680,164 @@ def create_app(
         result = _run(lambda conn: _open(conn, authorization, body))
         if isinstance(result, JSONResponse):
             return result
-        payload, phone = result
-        if phone is not None:
+        payload, dial = result
+        if dial is None:
+            return JSONResponse(payload, status_code=201)
+        phone, case_id, attempt_id = dial
+        try:
+            ref = call_provider.place(phone, case_id=case_id)
+            failed = False
+        except Exception as exc:
+            log.error("call provider failed: %s", type(exc).__name__)
+            ref, failed = None, True
+        after = _run(lambda conn: _after_dial(conn, case_id, attempt_id, ref, failed))
+        if isinstance(after, JSONResponse):
+            # The case is committed and stays `calling`; its timers decide it.
+            return JSONResponse(payload, status_code=201)
+        return JSONResponse(after, status_code=201)
+
+    @app.get("/v1/cases/{case_id}/call-code")
+    def get_call_code(case_id: str, authorization: str | None = Header(default=None)):
+        result = _run(lambda conn: _call_code(conn, authorization, case_id))
+        if isinstance(result, JSONResponse):
+            return result
+        return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+    if voice is not None and twilio_auth_token:
+
+        @app.get("/voice/prompts/{language}/{name}.mp3")
+        def get_prompt(language: str, name: str):
             try:
-                call_provider.place(phone)
+                path = prompt_path(language, name, prompts_dir)
+            except ValueError:
+                return Response(status_code=404)
+            if not path.is_file():
+                return Response(status_code=404)
+            return FileResponse(path, media_type="audio/mpeg")
+
+        @app.post("/voice/twilio/{kind}")
+        async def twilio_hook(kind: str, request: Request):
+            if kind not in ("outbound", "code", "answer", "status"):
+                return Response(status_code=404)
+            raw = (await request.body()).decode("utf-8", "replace")
+            params = dict(parse_qsl(raw, keep_blank_values=True))
+            query = request.url.query
+            url = voice.base_url + request.url.path + (f"?{query}" if query else "")
+            header = request.headers.get("X-Twilio-Signature")
+            if not valid_signature(twilio_auth_token, url, params, header):
+                return Response(status_code=403)
+            case_id = request.query_params.get("case_id", "")
+            try:
+                xml = await run_in_threadpool(_voice_work, kind, case_id, params)
             except Exception as exc:
-                log.error("call provider failed: %s", type(exc).__name__)
-        return JSONResponse(payload, status_code=201)
+                # No verdict from a crash: hang up and let the timers decide.
+                log.error("voice %s failed: %s", kind, type(exc).__name__)
+                xml = hang_up()
+            return Response(xml, media_type="application/xml")
+
+    def _voice_work(kind: str, case_id: str, params: dict) -> str:
+        try:
+            case_uuid = UUID(case_id)
+        except (TypeError, ValueError):
+            return hang_up()
+        conn = connect()
+        try:
+            xml = _voice_tx(conn, kind, case_uuid, params)
+            conn.commit()
+            return xml
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def _voice_tx(conn, kind: str, case_id: UUID, params: dict) -> str:
+        now = _now()
+        try:
+            view = lock_case(conn, case_id, now=now)
+        except CaseNotFound:
+            return hang_up()
+        attempt = call_attempt(conn, case_id, params.get("CallSid", ""))
+        if attempt is None:
+            return hang_up()
+        member = member_contact(conn, view["child_member_id"])
+        try:
+            language = call_language(None if member is None else member.get("phone_e164"))
+        except ValueError:
+            return hang_up()
+        if kind == "status":
+            return _call_status(conn, view, attempt, params.get("CallStatus", ""), now)
+        if kind == "outbound":
+            if view["state"] != "calling":
+                return hang_up()
+            return _code_gather(view, language, first=True)
+        digits = params.get("Digits", "")
+        if kind == "code":
+            return _code_hook(conn, view, language, digits, now)
+        return _answer_hook(conn, view, language, digits, now)
+
+    def _code_gather(view: dict, language: str, *, first: bool) -> str:
+        channel = view["code_channel"]
+        if channel == "one_time":
+            prompt = "one_time_greeting"
+        elif first and not view.get("has_app"):
+            prompt = "static_greeting"
+        else:
+            prompt = "static_switch"
+        return voice.code_gather(view["id"], language, channel, prompt)
+
+    def _code_hook(conn, view: dict, language: str, digits: str, now) -> str:
+        if view["state"] == "awaiting_answer":
+            return voice.question(view["id"], language)
+        if view["state"] != "calling":
+            return hang_up()
+        action, folded = keypad_action(view, digits)
+        if action == "ignore":
+            return _code_gather(view, language, first=False)
+        after = submit_digits(conn, view["id"], folded, now=now)
+        if after["state"] == "awaiting_answer":
+            return voice.question(view["id"], language)
+        if after["state"] == "calling":
+            if after["code_channel"] != view["code_channel"] or folded == "*":
+                return voice.code_gather(view["id"], language, "static", "static_switch")
+            # Silence on the static gather. No guess was made; the call ends
+            # and the status callback or the code window decides the case.
+            return hang_up()
+        if after["result"] in ("wrong", "code_locked"):
+            return voice.play_and_hang_up(language, "code_failed")
+        return hang_up()
+
+    def _answer_hook(conn, view: dict, language: str, digits: str, now) -> str:
+        if view["state"] == "calling":
+            return _code_gather(view, language, first=False)
+        if view["state"] != "awaiting_answer":
+            return hang_up()
+        action, _folded = keypad_action(view, digits)
+        if action not in ("answer_yes", "answer_no", "answer_unclear"):
+            action = "answer_unclear"
+        apply_case(conn, view["id"], action, now=now, rng=rng)
+        return voice.play_and_hang_up(language, "thanks")
+
+    def _call_status(conn, view: dict, attempt: dict, status: str, now) -> str:
+        """Twilio's final status. Nobody answering is never a no."""
+        ended = status in ("completed", "busy", "no-answer", "failed", "canceled")
+        if not ended:
+            return hang_up()
+        failed = status != "completed"
+        end_call_attempt(conn, attempt["id"], failed=failed, now=now)
+        state = view["state"]
+        event = step = None
+        if status in ("busy", "no-answer") and state == "calling":
+            event, step = "code_window_elapsed", f"call_{status.replace('-', '_')}"
+        elif status in ("failed", "canceled") and state == "calling":
+            event, step = "call_failed", "call_failed"
+        elif status == "completed" and state == "calling":
+            event, step = "code_window_elapsed", "call_ended_before_code"
+        elif state == "awaiting_answer":
+            event, step = "answer_window_elapsed", "call_ended_before_answer"
+        if event is not None:
+            apply_case(conn, view["id"], event, now=now, rng=rng, step=step)
+        return hang_up()
 
     @app.get("/v1/cases/{case_id}")
     def get_case(case_id: str, authorization: str | None = Header(default=None)):
@@ -1004,14 +1235,39 @@ def create_app(
         view = apply_case(conn, case_id, "start", now=now, rng=rng)
         if view["result"] == "no_number":
             raise APIError(400, "member_not_callable")
-        phone = None
+        dial = None
         if view["state"] == "calling":
             fresh = member_contact(conn, member["id"])
             number = None if fresh is None else fresh.get("phone_e164")
             if isinstance(number, str) and number != "":
-                record_call_attempt(conn, case_id, now=now)
-                phone = number
-        return _present(conn, view), phone
+                attempt_id = record_call_attempt(conn, case_id, now=now)
+                dial = (number, case_id, attempt_id)
+        return _present(conn, view), dial
+
+    def _after_dial(conn, case_id, attempt_id, ref, failed: bool) -> dict:
+        now = _now()
+        if failed:
+            finish_call_attempt(conn, attempt_id, status="failed", now=now)
+            view = apply_case(conn, case_id, "call_failed", now=now, rng=rng)
+        else:
+            finish_call_attempt(
+                conn, attempt_id, status="sent", now=now, provider_ref=ref
+            )
+            view = apply_case(conn, case_id, "call_accepted", now=now, rng=rng)
+        return _present(conn, view)
+
+    def _call_code(conn, authorization, case_id: str) -> dict:
+        now = _now()
+        user = _user(conn, authorization)
+        view = load_case(conn, _uuid(case_id), now=now)
+        if _visible(conn, user["user_id"], view) != "child":
+            raise APIError(403, "not_the_child")
+        code = None
+        if view["state"] == "calling" and view["code_channel"] == "one_time":
+            code = call_code(conn, view["id"], now=now)
+        if code is None:
+            return {"code": None, "fallback": "static"}
+        return {"code": code}
 
     def _get_case(conn, authorization, case_id: str) -> dict:
         user = _user(conn, authorization)

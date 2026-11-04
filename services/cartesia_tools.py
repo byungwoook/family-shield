@@ -54,10 +54,18 @@ def transcribe(audio_file_path: str, language: str = "en") -> str:
     return response.json()["text"]
 
 
-def make_voice_message(text: str = OUTREACH_SCRIPT, out_path: str = str(SAMPLES_DIR / "outreach.mp3")) -> str:
+def make_voice_message(
+    text: str = OUTREACH_SCRIPT,
+    out_path: str = str(SAMPLES_DIR / "outreach.mp3"),
+    *,
+    language: str = "en",
+    voice_id: str | None = None,
+) -> str:
     """Generate the outreach message as audio with Cartesia text-to-speech.
 
     Returns the path of the saved mp3 file (samples/outreach.mp3 unless out_path is given).
+    `language` and `voice_id` default to the hackathon call's English voice; the product's
+    Korean call prompts (scripts/render_prompts.py) pass `ko` and a Korean voice.
     """
     response = requests.post(
         f"{CARTESIA_API}/tts/bytes",
@@ -65,8 +73,8 @@ def make_voice_message(text: str = OUTREACH_SCRIPT, out_path: str = str(SAMPLES_
         json={
             "model_id": "sonic-3.6",
             "transcript": text,
-            "voice": CARTESIA_VOICE_ID,
-            "language": "en",
+            "voice": voice_id or CARTESIA_VOICE_ID,
+            "language": language,
             "output_format": {"container": "mp3", "sample_rate": 44100, "bit_rate": 128000},
         },
         timeout=60,

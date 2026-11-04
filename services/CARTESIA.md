@@ -5,6 +5,12 @@ send money" message, a Cartesia voice agent calls the student's saved phone numb
 family check code on the keypad, then answers one question: did you send that message? Without the call there
 is no verification, so voice is the core of the product, not a demo feature.
 
+> **Product note (milestone 6).** This page describes the hackathon call, which still runs. The product's
+> fallback call is Twilio (`backend/calls.py`): a fixed recording plus keypad digits, for `+1` and `+82`, with
+> no model on the call. Cartesia's product job is speech-to-text for voice notes and rendering those twelve
+> recordings ahead of time (`python -m scripts.render_prompts`, which calls `make_voice_message`). See
+> `docs/PRODUCT_REDESIGN.md`, "Speech and phone calls".
+
 ## Cartesia features we use
 
 | Feature | Where | What it does for us |
