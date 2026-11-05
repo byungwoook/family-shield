@@ -312,8 +312,12 @@ CREATE TABLE verification_attempts (
 CREATE INDEX verification_attempts_case_id_idx
     ON verification_attempts (case_id);
 
+-- seq is the insertion order. Events for one case are written under that
+-- case's row lock, so seq is the order they happened in. Several events in
+-- one transaction share `at`, and a random id cannot break that tie.
 CREATE TABLE case_events (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    seq bigint GENERATED ALWAYS AS IDENTITY,
     case_id uuid NOT NULL REFERENCES cases (id),
     at timestamptz NOT NULL,
     step text NOT NULL
@@ -325,11 +329,15 @@ COMMENT ON COLUMN case_events.step IS
 CREATE INDEX case_events_case_id_at_idx
     ON case_events (case_id, at);
 
+CREATE INDEX case_events_case_id_seq_idx
+    ON case_events (case_id, seq);
+
 CREATE INDEX case_events_case_id_step_idx
     ON case_events (case_id, step);
 
 CREATE TABLE family_events (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    seq bigint GENERATED ALWAYS AS IDENTITY,
     family_id uuid NOT NULL REFERENCES families (id),
     at timestamptz NOT NULL,
     actor_user_id uuid REFERENCES users (id),

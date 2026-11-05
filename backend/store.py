@@ -1367,7 +1367,7 @@ def _steps(conn, case_id: UUID) -> list[str]:
         SELECT step
         FROM case_events
         WHERE case_id = %s
-        ORDER BY at ASC, id ASC
+        ORDER BY seq ASC
         """,
         (case_id,),
     )

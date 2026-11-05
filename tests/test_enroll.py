@@ -518,7 +518,7 @@ def test_full_enrollment_then_confirm_makes_the_child_callable(env):
     steps = [
         row[0]
         for row in conn.execute(
-            "SELECT step FROM family_events WHERE family_id = %s ORDER BY at, step",
+            "SELECT step FROM family_events WHERE family_id = %s ORDER BY seq",
             (family_id,),
         ).fetchall()
     ]

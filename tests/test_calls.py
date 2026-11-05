@@ -517,7 +517,7 @@ def test_nobody_answering_is_yellow_timeout_never_not_sent(world, status):
     hook(client, "status", case_id, CallSid=sid, CallStatus=status)
     body = case_of(world, parent["token"], case_id)
     assert (body["state"], body["result"], body["color"]) == ("not_confirmed", "timeout", "yellow")
-    assert f"call_{status.replace('-', '_')}" in body["timeline"]
+    assert body["timeline"] == ["start", f"call_{status.replace('-', '_')}"]
     attempt = world["conn"].execute(
         "SELECT status, ended_at FROM verification_attempts WHERE case_id = %s", (case_id,)
     ).fetchone()
