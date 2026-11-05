@@ -23,6 +23,7 @@ Readings, where the milestone text allows more than one:
 """
 
 import logging
+import xml.etree.ElementTree as ET
 from datetime import timedelta
 
 import jwt
@@ -46,6 +47,7 @@ from backend.enroll import (
     normalize_invite,
     otp_matches,
     otp_message,
+    otp_voice_twiml,
 )
 from backend.signin import apple_verifier, google_verifier
 from test_api import (  # noqa: F401  (database_url and secrets are fixtures)
@@ -92,7 +94,7 @@ class FailingOtp:
     def __init__(self):
         self.tries = 0
 
-    def send(self, phone_e164, code):
+    def send(self, phone_e164, code, channel="sms"):
         self.tries += 1
         raise OtpSendFailed("twilio status 500")
 
@@ -882,3 +884,98 @@ def test_dev_login_still_works_beside_real_sign_in(env):
     client = env["client"]
     dev = login(client, "Dev parent")
     assert new_family(client, dev["token"])
+
+
+# --- OTP by voice, for a carrier that blocks the SMS ---
+
+
+def test_voice_otp_twiml_only_says_the_digits():
+    for phone, language in (("+821012345678", "ko-KR"), ("+14155550123", "en-US")):
+        xml = otp_voice_twiml(phone, "482910")
+        root = ET.fromstring(xml)
+        assert {child.tag for child in root} == {"Say", "Pause"}
+        for tag in ("Gather", "Play", "Record", "Redirect", "Dial"):
+            assert root.find(f".//{tag}") is None
+        says = root.findall("Say")
+        assert all(say.attrib["language"] == language for say in says)
+        assert all("4, 8, 2, 9, 1, 0" in say.text for say in says)
+    with pytest.raises(ValueError):
+        otp_voice_twiml("+14155550123", "12345")
+
+
+def test_twilio_voice_otp_is_an_inline_call_with_no_webhook():
+    posts = []
+
+    class Ok:
+        status_code = 201
+
+    sender = TwilioOtp(
+        account_sid="AC1",
+        auth_token="t",
+        from_number="+14155550100",
+        post=lambda url, **kw: posts.append((url, kw)) or Ok(),
+    )
+    sender.send("+821012345678", "482910", channel="voice")
+    url, kwargs = posts[0]
+    assert url.endswith("/Calls.json")
+    data = kwargs["data"]
+    assert set(data) == {"To", "From", "Twiml", "Timeout", "Record"}
+    assert data["Record"] == "false"
+    assert "Url" not in data and "StatusCallback" not in data
+    assert "4, 8, 2, 9, 1, 0" in data["Twiml"]
+    text_only = TwilioOtp(
+        account_sid="AC1", auth_token="t", messaging_service_sid="MG1",
+        post=lambda url, **kw: posts.append((url, kw)) or Ok(),
+    )
+    with pytest.raises(OtpSendFailed, match="no voice number"):
+        text_only.send("+821012345678", "482910", channel="voice")
+    with pytest.raises(ValueError):
+        sender.send("+821012345678", "482910", channel="fax")
+
+
+def test_a_voice_otp_proves_the_number_and_touches_no_case(env):
+    client, conn, sms = env["client"], env["conn"], env["sms"]
+    _parent, child, _family_id, _member_id = invited(env)
+    phone = next_phone("+82")
+    response = client.post(
+        "/v1/phones/otp", headers=auth(child["token"]),
+        json={"phone_e164": phone, "channel": "voice"},
+    )
+    assert response.status_code == 202
+    assert response.json()["channel"] == "voice"
+    assert sms.channels[-1] == "voice"
+    assert count(conn, "SELECT count(*) FROM cases") == 0
+    assert count(conn, "SELECT count(*) FROM verification_attempts") == 0
+    assert env["calls"].calls == []
+    verified = check_otp(client, child["token"], phone, sms.sent[-1][1])
+    assert verified.status_code == 200
+    assert count(conn, "SELECT count(*) FROM case_events") == 0
+
+
+def test_voice_and_sms_share_the_daily_cap(env):
+    client, clock, sms = env["client"], env["clock"], env["sms"]
+    _parent, child, _family_id, _member_id = invited(env)
+    phone = next_phone("+82")
+    for channel in ("sms", "voice", "sms", "voice", "sms"):
+        assert client.post(
+            "/v1/phones/otp", headers=auth(child["token"]),
+            json={"phone_e164": phone, "channel": channel},
+        ).status_code == 202
+        clock.advance(timedelta(minutes=1))
+    sixth = client.post(
+        "/v1/phones/otp", headers=auth(child["token"]),
+        json={"phone_e164": phone, "channel": "voice"},
+    )
+    assert sixth.status_code == 429
+    assert len(sms.sent) == 5
+
+
+def test_an_unknown_otp_channel_is_refused(env):
+    client = env["client"]
+    _parent, child, _family_id, _member_id = invited(env)
+    response = client.post(
+        "/v1/phones/otp", headers=auth(child["token"]),
+        json={"phone_e164": next_phone(), "channel": "whatsapp"},
+    )
+    assert response.status_code == 400
+    assert env["sms"].sent == []

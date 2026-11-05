@@ -70,6 +70,7 @@ from backend.codes import (
 )
 from backend.enroll import (
     INVITE_TTL,
+    OTP_CHANNELS,
     OTP_MAX_ATTEMPTS,
     OTP_SENDS_PER_DAY,
     OTP_TTL,
@@ -226,6 +227,7 @@ class InviteAcceptIn(BaseModel):
 class OtpStartIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     phone_e164: str = Field(max_length=16)
+    channel: str = Field(default="sms", max_length=8)
 
 
 class OtpCheckIn(BaseModel):
@@ -934,7 +936,7 @@ def create_app(
             return result
         payload, phone, code = result
         try:
-            otp_sender.send(phone, code)
+            otp_sender.send(phone, code, channel=body.channel)
         except Exception as exc:
             log.error("otp sender failed: %s", type(exc).__name__)
             return _fail(502, "sms_failed")
@@ -1078,6 +1080,8 @@ def create_app(
         now = _now()
         user = _user(conn, authorization)
         member = _enrolling_child(conn, user["user_id"])
+        if body.channel not in OTP_CHANNELS:
+            raise APIError(400, "invalid_body")
         if member["status"] != "invited" or member["phone_e164"] is not None:
             raise APIError(409, "phone_already_set")
         phone = body.phone_e164
@@ -1095,6 +1099,7 @@ def create_app(
         )
         payload = {
             "status": "sent",
+            "channel": body.channel,
             "phone_last4": phone[-4:],
             "expires_at": _iso(expires_at),
         }

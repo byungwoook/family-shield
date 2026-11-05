@@ -15,6 +15,14 @@ never asked for on the verification call. The message says so.
 `DevOtp` records codes for tests and logs them. It exists only when
 DEV_AUTH=1. `TwilioOtp` posts one message through the Twilio REST API.
 Neither logs a full phone number.
+
+Voice channel: when a Korean carrier blocks the SMS, the same challenge
+can be read out by a Twilio call instead (`channel="voice"`). The TwiML
+is sent inline with the call request (`Twiml`), so there is no webhook,
+no URL that holds the digits, and nothing that touches a case. It is
+`<Say>` only: no `<Gather>`, no `<Play>`, no recording. It proves the
+number, like the SMS. It is not the verification call, and those digits
+are not the one-time code a verification call asks for.
 """
 
 import logging
@@ -36,6 +44,7 @@ INVITE_TTL = timedelta(hours=24)
 OTP_TTL = timedelta(minutes=10)
 OTP_MAX_ATTEMPTS = 5
 OTP_SENDS_PER_DAY = 5
+OTP_CHANNELS = ("sms", "voice")
 _INVITE_DOMAIN = "invite"
 _OTP_DOMAIN = "phone_otp"
 _SIX_DIGITS = re.compile(r"[0-9]{6}")
@@ -125,15 +134,40 @@ def otp_message(phone_e164: str, code: str) -> str:
     )
 
 
+def otp_voice_twiml(phone_e164: str, code: str) -> str:
+    """`<Say>` the six digits twice, in the number's language. Nothing else."""
+    if not isinstance(code, str) or _SIX_DIGITS.fullmatch(code) is None:
+        raise ValueError("otp must be 6 digits")
+    spoken = ", ".join(code)
+    if sms_language(phone_e164) == "ko":
+        voice, language = "Polly.Seoyeon", "ko-KR"
+        first = f"패밀리 쉴드 전화번호 인증번호입니다. {spoken}."
+        again = f"다시 한 번 말씀드립니다. {spoken}. 확인 번호가 아닙니다."
+    else:
+        voice, language = "Polly.Joanna", "en-US"
+        first = f"Your Family Shield phone verification code is {spoken}."
+        again = f"Again, {spoken}. This is not your check code."
+    say = f'<Say voice="{voice}" language="{language}">'
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?><Response>'
+        f"{say}{first}</Say><Pause length=\"1\"/>{say}{again}</Say>"
+        "</Response>"
+    )
+
+
 class DevOtp:
     """Records `(phone, code)` and logs the code. DEV_AUTH=1 only."""
 
     def __init__(self) -> None:
         self.sent: list[tuple[str, str]] = []
+        self.channels: list[str] = []
 
-    def send(self, phone_e164: str, code: str) -> None:
+    def send(self, phone_e164: str, code: str, channel: str = "sms") -> None:
+        if channel not in OTP_CHANNELS:
+            raise ValueError("unknown otp channel")
         self.sent.append((phone_e164, code))
-        log.info("dev otp for number ending %s: %s", phone_e164[-4:], code)
+        self.channels.append(channel)
+        log.info("dev otp (%s) for number ending %s: %s", channel, phone_e164[-4:], code)
 
 
 class TwilioOtp:
@@ -179,13 +213,35 @@ class TwilioOtp:
             post=post,
         )
 
-    def send(self, phone_e164: str, code: str) -> None:
+    def send(self, phone_e164: str, code: str, channel: str = "sms") -> None:
+        if channel == "voice":
+            self._call(phone_e164, code)
+            return
+        if channel != "sms":
+            raise ValueError("unknown otp channel")
         data = {"To": phone_e164, "Body": otp_message(phone_e164, code)}
         if self._service:
             data["MessagingServiceSid"] = self._service
         else:
             data["From"] = self._from
         url = f"https://api.twilio.com/2010-04-01/Accounts/{self._sid}/Messages.json"
+        response = self._post(url, data=data, auth=(self._sid, self._token), timeout=10)
+        status = getattr(response, "status_code", None)
+        if not isinstance(status, int) or not 200 <= status < 300:
+            raise OtpSendFailed(f"twilio status {status}")
+
+    def _call(self, phone_e164: str, code: str) -> None:
+        if not self._from:
+            # A messaging service can text but cannot place a call.
+            raise OtpSendFailed("no voice number")
+        data = {
+            "To": phone_e164,
+            "From": self._from,
+            "Twiml": otp_voice_twiml(phone_e164, code),
+            "Timeout": "30",
+            "Record": "false",
+        }
+        url = f"https://api.twilio.com/2010-04-01/Accounts/{self._sid}/Calls.json"
         response = self._post(url, data=data, auth=(self._sid, self._token), timeout=10)
         status = getattr(response, "status_code", None)
         if not isinstance(status, int) or not 200 <= status < 300:

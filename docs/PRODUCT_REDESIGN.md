@@ -754,7 +754,7 @@ Token registration accepts `apns` and `fcm`. A permanent push failure with an op
 
 ### M9. iOS app, parent path
 
-New `ios/` SwiftUI project. Sign in with Apple, create family, show invite secret, enter a child confirmation, open a case by picking a child and typing text, poll `GET /v1/cases/{id}`, render green / red / yellow with the strings from this document. Localizations `en` and `ko` for those screens.
+New `ios/` SwiftUI project. Sign in with Apple (send a nonce: the app hashes a random value into the Apple request and `POST /v1/auth/apple` checks that claim, so a captured identity token cannot be replayed), create family, show invite secret, enter a child confirmation, open a case by picking a child and typing text, poll `GET /v1/cases/{id}`, render green / red / yellow with the strings from this document. Localizations `en` and `ko` for those screens.
 
 This milestone is done when the parent flow runs against the M4–M8 API on a simulator, with `DevOtp` and the fake call provider, plus one signed-in pass on a device if a device is available. UI tests cover: empty family, member not yet confirmed (Verify disabled), yellow result, red result.
 
@@ -768,7 +768,7 @@ Accept invite, enter phone, enter OTP, set the check code twice, register for no
 
 ### M12. Android app, parent path
 
-New `android/` Kotlin project. Google Sign-In, create family, show invite secret, confirm a child, open a case by picking a child and typing text, poll `GET /v1/cases/{id}`, render green / red / yellow with the same strings, `en` and `ko`. Done when this flow runs on an emulator against the API. UI tests cover: empty family, member not yet confirmed (Verify disabled), yellow result, red result.
+New `android/` Kotlin project. Google Sign-In (with a nonce, checked by `POST /v1/auth/google` the same way as Apple's), create family, show invite secret, confirm a child, open a case by picking a child and typing text, poll `GET /v1/cases/{id}`, render green / red / yellow with the same strings, `en` and `ko`. Done when this flow runs on an emulator against the API. UI tests cover: empty family, member not yet confirmed (Verify disabled), yellow result, red result.
 
 ### M13. Android share intent
 
