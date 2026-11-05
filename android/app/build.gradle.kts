@@ -13,6 +13,9 @@ val apiBase = providers.gradleProperty("fsApiBase").orNull
 // The OAuth "server" (web) client id the Google ID token is requested for. It is
 // the backend's GOOGLE_SERVER_CLIENT_ID. Blank: Google sign-in is hidden.
 val googleServerClientId = providers.gradleProperty("fsGoogleServerClientId").getOrElse("")
+// -PfsE2eBase=http://127.0.0.1:8000 runs the end-to-end unit test (FamilyFlowE2eTest)
+// against a local DEV_AUTH backend. Blank: that test is skipped with an assumption.
+val e2eBase = providers.gradleProperty("fsE2eBase").getOrElse("")
 
 fun quoted(value: String) = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
@@ -58,6 +61,14 @@ android {
     testOptions {
         unitTests.isIncludeAndroidResources = true
         unitTests.isReturnDefaultValues = true
+        unitTests.all { test ->
+            test.systemProperty("fs.e2e.base", e2eBase)
+            if (e2eBase.isNotBlank()) {
+                // A run against a live backend is never up to date and never from the build cache.
+                test.outputs.upToDateWhen { false }
+                test.outputs.cacheIf { false }
+            }
+        }
     }
 }
 
@@ -71,10 +82,12 @@ dependencies {
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.compose.material.icons.core)
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.kotlinx.serialization.json)
