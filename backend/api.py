@@ -19,6 +19,12 @@ confirm or reject. Outside DEV_AUTH=1, boot requires both sign-in
 audiences and a Twilio sender, so `DevOtp` cannot be the production path.
 The SMS, like the call, is sent only after the commit.
 
+Milestone 8: a child with a push token is asked by APNs or FCM first
+(`backend.push`). `tick` applies passed deadlines: 90 s without an answer
+moves `waiting_push` to the call, and 180 s / 45 s end a call yellow. A
+permanent push failure goes straight to the call, or to `unreachable` with
+no number. `POST /v1/me/push-token` stores the device token.
+
 Milestone 7: `POST /v1/cases` also takes multipart with an `audio` file
 (10 MB, `audio/*`). The file goes to a temp path; after the response it is
 transcribed, read for claims, matched to a catalog pattern, and deleted in
@@ -39,6 +45,7 @@ outcome of the fixed `money_request` question, and nothing that came from
 the suspicious message.
 """
 
+import asyncio
 import hashlib
 import logging
 import os
@@ -46,7 +53,7 @@ import re
 import secrets
 import tempfile
 from collections.abc import Callable, Mapping
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import parse_qsl
@@ -91,6 +98,7 @@ from backend.enroll import (
     normalize_invite,
     otp_matches,
 )
+from backend.push import push_from_env
 from backend.signin import InvalidIdToken, apple_verifier, google_verifier
 from backend.store import (
     CaseNotFound,
@@ -112,7 +120,10 @@ from backend.store import (
     end_call_attempt,
     ensure_user,
     family_roster,
-    finish_call_attempt,
+    clear_push_token,
+    due_case_ids,
+    expire_case,
+    finish_attempt,
     issue_invite,
     load_case,
     lock_case,
@@ -121,8 +132,12 @@ from backend.store import (
     memberships_for_user,
     open_case,
     record_call_attempt,
+    push_target,
+    record_push_attempt,
     reject_member,
     save_analysis,
+    set_push_token,
+    supersede_push_attempts,
     session_user,
     set_check_code,
     start_phone_otp,
@@ -248,6 +263,14 @@ class OtpCheckIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     phone_e164: str = Field(max_length=16)
     code: str = Field(max_length=16)
+
+
+class PushTokenIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    provider: str = Field(max_length=8)
+    token: str = Field(max_length=4096)
+    env: str | None = Field(default=None, max_length=16)
+    locale: str = Field(max_length=8)
 
 
 class DecisionIn(BaseModel):
@@ -543,6 +566,14 @@ def boot(environ: Mapping[str, str] | None = None) -> FastAPI:
         )
         if missing_prompts(prompts_dir):
             log.warning("voice prompt files are missing; calls will play nothing")
+    push_sender = push_from_env(get)
+    if push_sender is None:
+        log.warning("no APNs or FCM settings; app children are reached by the call after 90s")
+    timer_text = get("TIMER_SECONDS") or "5"
+    try:
+        timer_seconds = float(timer_text)
+    except ValueError:
+        raise RuntimeError("TIMER_SECONDS must be a number") from None
     verifiers = {
         "apple": apple_verifier(apple_audience) if apple_audience else None,
         "google": google_verifier(google_audience) if google_audience else None,
@@ -567,6 +598,8 @@ def boot(environ: Mapping[str, str] | None = None) -> FastAPI:
         prompts_dir=prompts_dir,
         analyst=Analyst.from_env(env),
         transcriber=cartesia_transcriber() if get("CARTESIA_API_KEY") else None,
+        push_sender=push_sender,
+        timer_seconds=timer_seconds,
     )
 
 
@@ -588,6 +621,8 @@ def create_app(
     analyst=None,
     transcriber: Callable[[str, str], str] | None = None,
     audio_dir: str | None = None,
+    push_sender=None,
+    timer_seconds: float | None = None,
 ) -> FastAPI:
     """Routes for one product process. Dependencies are injected.
 
@@ -598,12 +633,26 @@ def create_app(
     both, there are no voice routes and no webhook can move a case.
     `analyst` (`backend.analysis.Analyst`) and `transcriber(path, lang)` run
     after the case response. Either may be None, and then that part is skipped.
+    `push_sender.send(...)` returns sent / permanent / transient; None sends
+    nothing and the 90-second window falls through to the call. With
+    `timer_seconds`, a background loop runs `tick` that often; tests call
+    `app.state.tick()` themselves.
     """
     verifiers = dict(verifiers or {})
-    app = FastAPI(title="Family Shield")
+    @asynccontextmanager
+    async def lifespan(_app):
+        task = asyncio.create_task(_timer_loop()) if timer_seconds else None
+        try:
+            yield
+        finally:
+            if task is not None:
+                task.cancel()
+
+    app = FastAPI(title="Family Shield", lifespan=lifespan)
     # Read by tests to check which sender boot chose. Not used by a route.
     app.state.otp_sender = otp_sender
     app.state.call_provider = call_provider
+    app.state.push_sender = push_sender
 
     @app.exception_handler(RequestValidationError)
     async def _invalid_body(_request: Request, _exc: RequestValidationError):
@@ -884,21 +933,156 @@ def create_app(
         result = _run(lambda conn: _open(conn, authorization, body))
         if isinstance(result, JSONResponse):
             return result, None
-        payload, dial, opened = result
-        if dial is None:
-            return JSONResponse(payload, status_code=201), opened
-        phone, case_id, attempt_id = dial
-        try:
-            ref = call_provider.place(phone, case_id=case_id)
-            failed = False
-        except Exception as exc:
-            log.error("call provider failed: %s", type(exc).__name__)
-            ref, failed = None, True
-        after = _run(lambda conn: _after_dial(conn, case_id, attempt_id, ref, failed))
-        if isinstance(after, JSONResponse):
-            # The case is committed and stays `calling`; its timers decide it.
-            return JSONResponse(payload, status_code=201), opened
-        return JSONResponse(after, status_code=201), opened
+        payload, action, opened = result
+        after = _deliver(action)
+        return JSONResponse(after or payload, status_code=201), opened
+
+    def _next_step(conn, case_id, view: dict, now):
+        """What the state just entered asks for, written as a `sending` attempt.
+
+        `calling` with a number: a call. `waiting_push` with a token: a push.
+        The provider is contacted only after this transaction commits.
+        """
+        member = member_contact(conn, view["child_member_id"])
+        if member is None:
+            return None
+        if view["state"] == "calling":
+            number = member.get("phone_e164")
+            if isinstance(number, str) and number != "":
+                attempt_id = record_call_attempt(conn, case_id, now=now)
+                return ("dial", number, case_id, attempt_id)
+        if view["state"] == "waiting_push":
+            target = push_target(conn, member["id"])
+            if target is not None:
+                attempt_id = record_push_attempt(
+                    conn, case_id, provider=target["provider"], now=now
+                )
+                return ("push", target, member["id"], case_id, attempt_id)
+        return None
+
+    def _deliver(action):
+        """Run the push or call a committed transition asked for, then record the answer.
+
+        Returns the parent's case body after the last provider answer, or None
+        when nothing was sent. A permanent push failure applies `push_failed`,
+        which can enter `calling`, and the loop then places that call.
+        """
+        body = None
+        while action is not None:
+            if action[0] == "dial":
+                _kind, phone, case_id, attempt_id = action
+                try:
+                    ref = call_provider.place(phone, case_id=case_id)
+                    failed = False
+                except Exception as exc:
+                    log.error("call provider failed: %s", type(exc).__name__)
+                    ref, failed = None, True
+                result = _run(
+                    lambda conn, c=case_id, a=attempt_id, r=ref, f=failed: _after_dial(
+                        conn, c, a, r, f
+                    )
+                )
+                # On a bookkeeping error the case stays `calling` for the timer.
+                return body if isinstance(result, JSONResponse) else result
+            _kind, target, member_id, case_id, attempt_id = action
+            outcome = "transient"
+            if push_sender is not None:
+                try:
+                    outcome = push_sender.send(
+                        provider=target["provider"],
+                        token=target["token"],
+                        env=target["env"],
+                        locale=target["locale"],
+                        case_id=case_id,
+                    )
+                except Exception as exc:
+                    log.error("push sender failed: %s", type(exc).__name__)
+            result = _run(
+                lambda conn, c=case_id, m=member_id, a=attempt_id, t=target, o=outcome: _after_push(
+                    conn, c, m, a, t, o
+                )
+            )
+            if isinstance(result, JSONResponse):
+                return body
+            body, action = result
+        return body
+
+    def _after_push(conn, case_id, member_id, attempt_id, target, outcome: str):
+        now = _now()
+        if outcome == "sent":
+            finish_attempt(conn, attempt_id, status="sent", now=now)
+            return _present(conn, load_case(conn, case_id, now=now)), None
+        finish_attempt(conn, attempt_id, status="failed", now=now)
+        if outcome != "permanent":
+            # Not delivered for now. The 90-second window still falls through.
+            return _present(conn, load_case(conn, case_id, now=now)), None
+        clear_push_token(conn, member_id, target["token"])
+        view = apply_case(conn, case_id, "push_failed", now=now, rng=rng)
+        return _present(conn, view), _next_step(conn, case_id, view, now)
+
+    def tick() -> int:
+        """Apply every passed deadline once and send what it asks for. Returns how many moved."""
+        ids = _run(lambda conn: due_case_ids(conn, now=_now()))
+        if isinstance(ids, JSONResponse):
+            return 0
+        moved = 0
+        for case_id in ids:
+            result = _run(lambda conn, c=case_id: _expire(conn, c))
+            if isinstance(result, JSONResponse) or result is None:
+                continue
+            moved += 1
+            _deliver(result[1])
+        return moved
+
+    def _expire(conn, case_id):
+        now = _now()
+        view = expire_case(conn, case_id, now=now, rng=rng)
+        if view is None:
+            return None
+        if view["state"] == "calling":
+            supersede_push_attempts(conn, case_id, now=now)
+        return ("moved", _next_step(conn, case_id, view, now))
+
+    app.state.tick = tick
+
+    async def _timer_loop() -> None:
+        while True:
+            await asyncio.sleep(timer_seconds)
+            try:
+                await run_in_threadpool(tick)
+            except Exception as exc:
+                log.error("timer tick failed: %s", type(exc).__name__)
+
+    @app.post("/v1/me/push-token")
+    def post_push_token(body: PushTokenIn, authorization: str | None = Header(default=None)):
+        return _run(lambda conn: _push_token(conn, authorization, body))
+
+    def _push_token(conn, authorization, body: PushTokenIn) -> dict:
+        user = _user(conn, authorization)
+        member = child_membership(conn, user["user_id"])
+        if member is None:
+            raise APIError(403, "not_a_child")
+        token = body.token.strip()
+        if token == "" or any(ch.isspace() for ch in token) or body.locale not in ("en", "ko"):
+            raise APIError(400, "invalid_body")
+        if body.provider == "apns":
+            if body.env not in ("sandbox", "production"):
+                raise APIError(400, "invalid_body")
+        elif body.provider == "fcm":
+            if body.env is not None:
+                raise APIError(400, "invalid_body")
+        else:
+            raise APIError(400, "invalid_body")
+        set_push_token(
+            conn,
+            member["id"],
+            user_id=user["user_id"],
+            provider=body.provider,
+            token=token,
+            env=body.env,
+            locale=body.locale,
+        )
+        return {"status": "registered", "provider": body.provider}
 
     @app.get("/v1/cases/{case_id}/call-code")
     def get_call_code(case_id: str, authorization: str | None = Header(default=None)):
@@ -1442,24 +1626,16 @@ def create_app(
         view = apply_case(conn, case_id, "start", now=now, rng=rng)
         if view["result"] == "no_number":
             raise APIError(400, "member_not_callable")
-        dial = None
-        if view["state"] == "calling":
-            fresh = member_contact(conn, member["id"])
-            number = None if fresh is None else fresh.get("phone_e164")
-            if isinstance(number, str) and number != "":
-                attempt_id = record_call_attempt(conn, case_id, now=now)
-                dial = (number, case_id, attempt_id)
-        return _present(conn, view), dial, (case_id, user["locale"])
+        action = _next_step(conn, case_id, view, now)
+        return _present(conn, view), action, (case_id, user["locale"])
 
     def _after_dial(conn, case_id, attempt_id, ref, failed: bool) -> dict:
         now = _now()
         if failed:
-            finish_call_attempt(conn, attempt_id, status="failed", now=now)
+            finish_attempt(conn, attempt_id, status="failed", now=now)
             view = apply_case(conn, case_id, "call_failed", now=now, rng=rng)
         else:
-            finish_call_attempt(
-                conn, attempt_id, status="sent", now=now, provider_ref=ref
-            )
+            finish_attempt(conn, attempt_id, status="sent", now=now, provider_ref=ref)
             view = apply_case(conn, case_id, "call_accepted", now=now, rng=rng)
         return _present(conn, view)
 

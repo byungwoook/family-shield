@@ -674,7 +674,7 @@ def record_call_attempt(conn, case_id: UUID, *, now: datetime) -> UUID:
     return row["id"]
 
 
-def finish_call_attempt(
+def finish_attempt(
     conn,
     attempt_id: UUID,
     *,
@@ -682,7 +682,7 @@ def finish_call_attempt(
     now: datetime,
     provider_ref: str | None = None,
 ) -> None:
-    """`sent` with the provider's CallSid, or `failed` with an end time."""
+    """`sent` with the provider's reference (a CallSid), or `failed` with an end time."""
     _require_aware(now, "now")
     if status not in ("sent", "failed"):
         raise ValueError("attempt status must be sent or failed")
@@ -697,6 +697,9 @@ def finish_call_attempt(
         """,
         (status, provider_ref, status, now, attempt_id),
     )
+
+
+finish_call_attempt = finish_attempt
 
 
 def call_attempt(conn, case_id: UUID, call_sid: str) -> dict | None:
@@ -1046,6 +1049,148 @@ def add_family_event(
         """,
         (family_id, now, actor_user_id, step),
     )
+
+
+_TIMED_EVENTS = {
+    "waiting_push": ("push_window_elapsed", "push_window_elapsed"),
+    "calling": ("code_window_elapsed", "code_window_elapsed"),
+    "awaiting_answer": ("answer_window_elapsed", "answer_window_elapsed"),
+}
+
+
+def set_push_token(
+    conn,
+    member_id: UUID,
+    *,
+    user_id: UUID,
+    provider: str,
+    token: str,
+    env: str | None,
+    locale: str,
+) -> None:
+    """Store this device's token on the child's row and the device locale on the user.
+
+    One token is one device: if another membership held it, that row loses it.
+    """
+    _execute(
+        conn,
+        """
+        UPDATE family_members
+        SET push_token = NULL, push_provider = NULL, push_env = NULL
+        WHERE push_token = %s AND id <> %s
+        """,
+        (token, member_id),
+    )
+    _execute(
+        conn,
+        """
+        UPDATE family_members
+        SET push_token = %s, push_provider = %s, push_env = %s
+        WHERE id = %s
+        """,
+        (token, provider, env, member_id),
+    )
+    _execute(conn, "UPDATE users SET locale = %s WHERE id = %s", (locale, user_id))
+
+
+def clear_push_token(conn, member_id: UUID, token: str) -> None:
+    """Forget a token the provider called dead, unless the device already sent a new one."""
+    _execute(
+        conn,
+        """
+        UPDATE family_members
+        SET push_token = NULL, push_provider = NULL, push_env = NULL
+        WHERE id = %s AND push_token = %s
+        """,
+        (member_id, token),
+    )
+
+
+def push_target(conn, member_id: UUID) -> dict | None:
+    """Provider, token, env, and the child's locale. None when there is no token."""
+    row = _one(
+        conn,
+        """
+        SELECT m.push_provider, m.push_token, m.push_env, u.locale
+        FROM family_members AS m
+        LEFT JOIN users AS u ON u.id = m.user_id
+        WHERE m.id = %s
+        """,
+        (member_id,),
+    )
+    if row is None or not row["push_token"]:
+        return None
+    return {
+        "provider": row["push_provider"],
+        "token": row["push_token"],
+        "env": row["push_env"],
+        "locale": row["locale"] or "en",
+    }
+
+
+def record_push_attempt(conn, case_id: UUID, *, provider: str, now: datetime) -> UUID:
+    """One push attempt, `sending` until the provider answers."""
+    _require_aware(now, "now")
+    row = _one(
+        conn,
+        """
+        INSERT INTO verification_attempts (case_id, channel, status, provider, started_at)
+        VALUES (%s, 'push', 'sending', %s, %s)
+        RETURNING id
+        """,
+        (case_id, provider, now),
+    )
+    return row["id"]
+
+
+def supersede_push_attempts(conn, case_id: UUID, *, now: datetime) -> None:
+    """The window passed and the call takes over: open push attempts are superseded."""
+    _execute(
+        conn,
+        """
+        UPDATE verification_attempts
+        SET status = 'superseded', ended_at = COALESCE(ended_at, %s)
+        WHERE case_id = %s AND channel = 'push' AND status IN ('sending', 'sent')
+        """,
+        (now, case_id),
+    )
+
+
+def due_case_ids(conn, *, now: datetime, limit: int = 100) -> list:
+    """Open cases whose deadline has passed, oldest deadline first."""
+    _require_aware(now, "now")
+    rows = _all(
+        conn,
+        """
+        SELECT id
+        FROM cases
+        WHERE state IN ('waiting_push', 'calling', 'awaiting_answer')
+          AND deadline_at IS NOT NULL
+          AND deadline_at <= %s
+        ORDER BY deadline_at ASC, id ASC
+        LIMIT %s
+        """,
+        (now, limit),
+    )
+    return [row["id"] for row in rows]
+
+
+def expire_case(conn, case_id: UUID, *, now: datetime, rng=None) -> dict | None:
+    """Apply this case's window event if its deadline has passed. None when nothing moved.
+
+    The case is locked first and the deadline read again, so a webhook or an
+    answer that won the race leaves nothing for the timer to do.
+    """
+    _require_aware(now, "now")
+    row = _load(conn, case_id, lock=True)
+    if row is None or row["state"] not in _TIMED_EVENTS:
+        return None
+    deadline = row["deadline_at"]
+    if deadline is None or deadline > now:
+        return None
+    event, step = _TIMED_EVENTS[row["state"]]
+    view = apply_case(conn, case_id, event, now=now, rng=rng, step=step)
+    return view if view["state"] != row["state"] else None
 
 
 TEXT_RETENTION = timedelta(days=30)
