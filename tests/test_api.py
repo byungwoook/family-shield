@@ -541,6 +541,32 @@ def test_boot_leaves_dev_routes_out_of_production():
     assert "/tools/verify_code" not in paths
 
 
+def test_production_does_not_serve_the_generated_docs():
+    app = boot(
+        {
+            "ENV": "production",
+            "DEV_AUTH": "",
+            "DATABASE_URL": "postgresql://example",
+            "CODE_PEPPER": "pepper",
+            "OTP_DERIVATION_KEY": "key",
+            **PRODUCTION_SIGN_IN,
+        }
+    )
+    client = TestClient(app)
+    for path in ("/docs", "/docs/oauth2-redirect", "/redoc", "/openapi.json"):
+        assert client.get(path).status_code == 404, path
+    dev = boot(
+        {
+            "ENV": "development",
+            "DEV_AUTH": "1",
+            "DATABASE_URL": "postgresql://example",
+            "CODE_PEPPER": "pepper",
+            "OTP_DERIVATION_KEY": "key",
+        }
+    )
+    assert TestClient(dev).get("/openapi.json").status_code == 200
+
+
 def test_dev_auth_must_be_exactly_one():
     app = boot(
         {
