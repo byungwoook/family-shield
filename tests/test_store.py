@@ -65,9 +65,11 @@ from backend.store import (
     apply_schema,
     call_code,
     complete_phone_otp,
+    consume_signin_nonce,
     create_family,
     create_user,
     deadline_for,
+    issue_signin_nonce,
     load_case,
     member_flags,
     open_case,
@@ -170,6 +172,7 @@ TABLES = {
         "consumed_at",
         "created_at",
     },
+    "signin_nonces": {"nonce_hash", "expires_at", "consumed_at"},
 }
 
 TIMESTAMPTZ = {
@@ -199,6 +202,8 @@ TIMESTAMPTZ = {
     ("phone_otp", "expires_at"),
     ("phone_otp", "consumed_at"),
     ("phone_otp", "created_at"),
+    ("signin_nonces", "expires_at"),
+    ("signin_nonces", "consumed_at"),
 }
 
 FORBIDDEN_COLUMNS = {
@@ -682,6 +687,33 @@ def test_plaintext_codes_do_not_fit_the_hash_columns(conn):
         """,
         (ids["member"], ids["phone"], NOW, NOW),
     )
+
+
+def test_a_raw_sign_in_nonce_does_not_fit_the_hash_column(conn):
+    assert_rejected(
+        conn,
+        "INSERT INTO signin_nonces (nonce_hash, expires_at) VALUES (%s, %s)",
+        ("n" * 43, NOW),
+    )
+    assert_rejected(
+        conn,
+        "INSERT INTO signin_nonces (nonce_hash, expires_at) VALUES (%s, %s)",
+        ("A" * 64, NOW),
+    )
+
+
+def test_a_sign_in_nonce_is_spent_once_and_not_after_expiry(conn):
+    live, late = "a" * 64, "b" * 64
+    issue_signin_nonce(conn, nonce_hash=live, expires_at=NOW + timedelta(minutes=10), now=NOW)
+    issue_signin_nonce(conn, nonce_hash=late, expires_at=NOW + timedelta(minutes=10), now=NOW)
+    assert consume_signin_nonce(conn, live, now=NOW) is True
+    assert consume_signin_nonce(conn, live, now=NOW) is False
+    assert consume_signin_nonce(conn, "c" * 64, now=NOW) is False
+    assert consume_signin_nonce(conn, late, now=NOW + timedelta(minutes=10)) is False
+    consumed = conn.execute(
+        "SELECT nonce_hash FROM signin_nonces WHERE consumed_at IS NOT NULL"
+    ).fetchall()
+    assert consumed == [(live,)]
 
 
 def test_parent_cannot_store_a_check_code(conn):
@@ -1818,6 +1850,7 @@ def _delete_user_graph(url: str) -> None:
         connection.execute("DELETE FROM cases")
         connection.execute("DELETE FROM family_events")
         connection.execute("DELETE FROM phone_otp")
+        connection.execute("DELETE FROM signin_nonces")
         connection.execute("DELETE FROM family_members")
         connection.execute("DELETE FROM families")
         connection.execute("DELETE FROM sessions")

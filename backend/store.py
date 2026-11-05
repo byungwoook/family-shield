@@ -11,6 +11,7 @@ code or a static salt has to be chosen. This module does not call
 `datetime.now` or `secrets`. A one-time code is not kept. The row stores a
 nonce, and `call_code` derives the digits from that nonce.
 
+Sign-in nonces (milestone 12) are stored as a keyed hash and spent once.
 Session rows, the dev helper that marks a child callable, and one call
 attempt row are written here too. Milestone 5 adds invites, SMS OTP
 challenges, parent confirm and reject, and family timeline rows. None of
@@ -567,6 +568,93 @@ def memberships_for_user(conn, user_id: UUID) -> list:
         """,
         (user_id,),
     )
+
+
+def user_memberships(conn, user_id: UUID) -> list:
+    """`GET /v1/me`: non-removed memberships with the family name, oldest first.
+
+    No phone number, hash, salt, or invite. Ties on created_at break on id.
+    """
+    return _all(
+        conn,
+        """
+        SELECT
+            m.id AS member_id, m.family_id, f.name AS family_name,
+            m.role, m.status, m.display_name
+        FROM family_members AS m
+        JOIN families AS f ON f.id = m.family_id
+        WHERE m.user_id = %s AND m.status <> 'removed'
+        ORDER BY m.created_at ASC, m.id ASC
+        """,
+        (user_id,),
+    )
+
+
+def family_cases(conn, family_id: UUID, *, limit: int) -> list:
+    """The family's most recent cases, newest first, for the parent's list.
+
+    Only the summary columns: no parent text, transcript, claims, pattern,
+    nonce, or code hash. Ties on created_at break on id, descending. The
+    caller checks that the reader is an active parent and bounds `limit`.
+    """
+    if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+        raise ValueError("limit must be a positive int")
+    return _all(
+        conn,
+        """
+        SELECT
+            c.id, c.child_member_id, m.display_name AS child_display_name,
+            c.state, c.result, c.created_at, c.decided_at
+        FROM cases AS c
+        JOIN family_members AS m ON m.id = c.child_member_id
+        WHERE c.family_id = %s
+        ORDER BY c.created_at DESC, c.id DESC
+        LIMIT %s
+        """,
+        (family_id, limit),
+    )
+
+
+def issue_signin_nonce(conn, *, nonce_hash: str, expires_at: datetime, now: datetime) -> None:
+    """Store the keyed hash of a sign-in nonce. The raw nonce is not a parameter.
+
+    Rows already past `expires_at` are deleted first, so the public route
+    keeps the table to about ten minutes of issues. A deleted row and a
+    spent one read the same to `consume_signin_nonce`.
+    """
+    _require_aware(expires_at, "expires_at")
+    _require_aware(now, "now")
+    if not isinstance(nonce_hash, str) or len(nonce_hash) < 32:
+        raise ValueError("token_hash_too_short")
+    _execute(conn, "DELETE FROM signin_nonces WHERE expires_at <= %s", (now,))
+    _execute(
+        conn,
+        "INSERT INTO signin_nonces (nonce_hash, expires_at) VALUES (%s, %s)",
+        (nonce_hash, expires_at),
+    )
+
+
+def consume_signin_nonce(conn, nonce_hash: str, *, now: datetime) -> bool:
+    """Spend a nonce once. False when it is unknown, spent, or expired.
+
+    One UPDATE with the conditions in its WHERE: of two requests racing on
+    one nonce, the second waits on the row lock, re-reads `consumed_at`, and
+    gets False. Expiry is `now >= expires_at`, as for sessions.
+    """
+    _require_aware(now, "now")
+    if not isinstance(nonce_hash, str):
+        return False
+    row = _one(
+        conn,
+        """
+        UPDATE signin_nonces
+        SET consumed_at = %s
+        WHERE nonce_hash = %s AND consumed_at IS NULL AND expires_at > %s
+        RETURNING nonce_hash
+        """,
+        (now, nonce_hash, now),
+    )
+    return row is not None
 
 
 def member_contact(conn, member_id: UUID) -> dict | None:

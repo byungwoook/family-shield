@@ -395,3 +395,20 @@ CREATE INDEX sessions_user_id_idx
 
 CREATE INDEX families_created_by_idx
     ON families (created_by);
+
+-- A sign-in nonce (milestone 12). POST /v1/auth/nonce issues a raw value;
+-- only keyed_hash("signin_nonce", raw) is stored. Apple and Google sign-in
+-- consume it once, before expires_at, in the transaction that creates the
+-- session, so a captured ID token cannot be replayed with its nonce.
+CREATE TABLE signin_nonces (
+    nonce_hash text PRIMARY KEY,
+    expires_at timestamptz NOT NULL,
+    consumed_at timestamptz,
+    CONSTRAINT signin_nonces_nonce_hash_not_plaintext CHECK (nonce_hash ~ '^[0-9a-f]{64}$')
+);
+
+CREATE INDEX signin_nonces_expires_at_idx
+    ON signin_nonces (expires_at);
+
+CREATE INDEX cases_family_id_created_at_idx
+    ON cases (family_id, created_at);
