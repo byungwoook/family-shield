@@ -717,7 +717,15 @@ def create_app(
             if task is not None:
                 task.cancel()
 
-    app = FastAPI(title="Family Shield", lifespan=lifespan)
+    # The generated docs and schema describe every route, including how to
+    # reach the voice webhooks. They are a development aid, not a public page.
+    app = FastAPI(
+        title="Family Shield",
+        lifespan=lifespan,
+        docs_url="/docs" if dev_auth else None,
+        redoc_url="/redoc" if dev_auth else None,
+        openapi_url="/openapi.json" if dev_auth else None,
+    )
     # Read by tests to check which sender boot chose. Not used by a route.
     app.state.otp_sender = otp_sender
     app.state.call_provider = call_provider
