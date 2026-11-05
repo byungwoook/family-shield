@@ -19,6 +19,11 @@ confirm or reject. Outside DEV_AUTH=1, boot requires both sign-in
 audiences and a Twilio sender, so `DevOtp` cannot be the production path.
 The SMS, like the call, is sent only after the commit.
 
+Milestone 7: `POST /v1/cases` also takes multipart with an `audio` file
+(10 MB, `audio/*`). The file goes to a temp path; after the response it is
+transcribed, read for claims, matched to a catalog pattern, and deleted in
+`finally`. None of that can change a state or a result.
+
 Milestone 6 adds the Twilio keypad call (`backend.calls`): the call is
 placed after the commit, and its CallSid or its failure is written in a
 second transaction. `/voice/twilio/*` checks `X-Twilio-Signature` against
@@ -39,6 +44,7 @@ import logging
 import os
 import re
 import secrets
+import tempfile
 from collections.abc import Callable, Mapping
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -46,12 +52,13 @@ from pathlib import Path
 from urllib.parse import parse_qsl
 from uuid import UUID, uuid4
 
-from fastapi import FastAPI, Header, Request
+from fastapi import BackgroundTasks, FastAPI, Header, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
+from backend.analysis import Analyst, cartesia_transcriber, stt_language
 from backend.calls import (
     PROMPTS_DIR,
     TwilioCalls,
@@ -115,6 +122,7 @@ from backend.store import (
     open_case,
     record_call_attempt,
     reject_member,
+    save_analysis,
     session_user,
     set_check_code,
     start_phone_otp,
@@ -126,6 +134,12 @@ from services.code_webhook import _digits
 log = logging.getLogger(__name__)
 
 SESSION_TTL = timedelta(days=30)
+AUDIO_LIMIT = 10 * 1024 * 1024
+AUDIO_SUFFIXES = frozenset({".mp3", ".m4a", ".mp4", ".aac", ".wav", ".ogg", ".opus", ".webm", ".amr"})
+TRANSCRIPT_LIMIT = 20000
+# Seven or more digits, allowing spaces, dots, dashes, and parentheses
+# between them: a phone, card, or account number in the voice note.
+_LONG_NUMBER = re.compile(r"\+?\(?\d(?:[\s().-]*\d){6,}")
 _NAME_LIMIT = 200
 _TEXT_LIMIT = 8000
 _DIGITS_LIMIT = 32
@@ -312,6 +326,19 @@ def child_callable(member: dict) -> bool:
     token = member.get("push_token")
     has_push = isinstance(token, str) and token.strip() != ""
     return opted_in or has_push
+
+
+def redact_numbers(text: str) -> str:
+    """Replace phone- and account-length digit runs before text goes to Claude."""
+    return _LONG_NUMBER.sub("[number]", text)
+
+
+def _discard(path) -> None:
+    if path:
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
 
 
 def color_of(state: str) -> str:
@@ -538,6 +565,8 @@ def boot(environ: Mapping[str, str] | None = None) -> FastAPI:
         voice=voice,
         twilio_auth_token=twilio_token,
         prompts_dir=prompts_dir,
+        analyst=Analyst.from_env(env),
+        transcriber=cartesia_transcriber() if get("CARTESIA_API_KEY") else None,
     )
 
 
@@ -556,6 +585,9 @@ def create_app(
     voice: Voice | None = None,
     twilio_auth_token: str = "",
     prompts_dir: Path = PROMPTS_DIR,
+    analyst=None,
+    transcriber: Callable[[str, str], str] | None = None,
+    audio_dir: str | None = None,
 ) -> FastAPI:
     """Routes for one product process. Dependencies are injected.
 
@@ -564,6 +596,8 @@ def create_app(
     the OTP routes answer `otp_unavailable` and write nothing.
     `voice` and `twilio_auth_token` together turn on `/voice/*`. Without
     both, there are no voice routes and no webhook can move a case.
+    `analyst` (`backend.analysis.Analyst`) and `transcriber(path, lang)` run
+    after the case response. Either may be None, and then that part is skipped.
     """
     verifiers = dict(verifiers or {})
     app = FastAPI(title="Family Shield")
@@ -712,13 +746,147 @@ def create_app(
         return _run(lambda conn: _my_check_code(conn, authorization, body))
 
     @app.post("/v1/cases")
-    def post_case(body: CaseIn, authorization: str | None = Header(default=None)):
+    async def post_case(
+        request: Request,
+        background: BackgroundTasks,
+        authorization: str | None = Header(default=None),
+    ):
+        if _bearer(authorization) is None:
+            return _fail(401, "unauthorized")
+        parsed = await _case_request(request)
+        if isinstance(parsed, JSONResponse):
+            return parsed
+        body, audio_path = parsed
+        try:
+            response, opened = await run_in_threadpool(_open_and_dial, body, authorization)
+        except BaseException:
+            _discard(audio_path)
+            raise
+        if opened is None:
+            _discard(audio_path)
+            return response
+        case_id, locale = opened
+        # After the response: analysis must not delay the push or the call.
+        background.add_task(_analyze, case_id, audio_path, body.text, locale)
+        return response
+
+    async def _case_request(request: Request):
+        """`CaseIn` from JSON, or from multipart with an optional `audio` file."""
+        kind = request.headers.get("content-type", "")
+        if not kind.startswith("multipart/form-data"):
+            try:
+                data = await request.json()
+                return CaseIn(**data), None
+            except Exception:
+                return _fail(400, "invalid_body")
+        length = request.headers.get("content-length", "")
+        if not length.isdigit():
+            return _fail(411, "length_required")
+        if int(length) > AUDIO_LIMIT + 64 * 1024:
+            return _fail(413, "audio_too_large")
+        try:
+            form = await request.form(max_files=1, max_fields=3)
+        except Exception:
+            return _fail(400, "invalid_body")
+        audio_path = None
+        try:
+            fields = {}
+            for key, value in form.multi_items():
+                if key in fields or key not in ("child_member_id", "text", "audio"):
+                    return _fail(400, "invalid_body")
+                fields[key] = value
+            upload = fields.pop("audio", None)
+            if any(not isinstance(value, str) for value in fields.values()):
+                return _fail(400, "invalid_body")
+            body = CaseIn(**fields)
+            if upload is not None:
+                if isinstance(upload, str):
+                    return _fail(400, "invalid_body")
+                audio_path = await _save_audio(upload)
+            return body, audio_path
+        except APIError as exc:
+            _discard(audio_path)
+            return _fail(exc.status, exc.code)
+        except Exception:
+            _discard(audio_path)
+            return _fail(400, "invalid_body")
+        finally:
+            await form.close()
+
+    async def _save_audio(upload) -> str:
+        kind = (upload.content_type or "").split(";")[0].strip().lower()
+        if not kind.startswith("audio/"):
+            raise APIError(415, "unsupported_audio")
+        suffix = Path(upload.filename or "").suffix.lower()
+        if suffix not in AUDIO_SUFFIXES:
+            suffix = ".audio"
+        handle, path = tempfile.mkstemp(prefix="voice-note-", suffix=suffix, dir=audio_dir)
+        size = 0
+        try:
+            with os.fdopen(handle, "wb") as out:
+                while True:
+                    chunk = await upload.read(64 * 1024)
+                    if not chunk:
+                        break
+                    size += len(chunk)
+                    if size > AUDIO_LIMIT:
+                        raise APIError(413, "audio_too_large")
+                    out.write(chunk)
+        except BaseException:
+            _discard(path)
+            raise
+        if size == 0:
+            _discard(path)
+            raise APIError(400, "empty_audio")
+        return path
+
+    def _analyze(case_id, audio_path, parent_text: str, locale: str) -> None:
+        """Transcribe, read claims, pick a pattern, and save. Never a verdict."""
+        transcript = None
+        try:
+            if audio_path is not None and transcriber is not None:
+                try:
+                    heard = transcriber(audio_path, stt_language(locale))
+                    if isinstance(heard, str) and heard.strip():
+                        transcript = heard.strip()[:TRANSCRIPT_LIMIT]
+                except Exception as exc:
+                    log.warning("transcribe failed: %s", type(exc).__name__)
+        finally:
+            _discard(audio_path)
+        try:
+            claims = {}
+            pattern_id = None
+            if analyst is not None:
+                if transcript:
+                    claims = analyst.claims(redact_numbers(transcript))
+                source = transcript or parent_text
+                if source and source.strip():
+                    pattern_id = analyst.pattern(redact_numbers(source))
+            _run_quiet(
+                lambda conn: save_analysis(
+                    conn,
+                    case_id,
+                    now=_now(),
+                    transcript=transcript,
+                    claims=claims or None,
+                    pattern_id=pattern_id,
+                    audio_deleted=audio_path is not None,
+                )
+            )
+        except Exception as exc:
+            log.warning("analysis failed: %s", type(exc).__name__)
+
+    def _run_quiet(work) -> None:
+        with _transaction() as conn:
+            work(conn)
+
+    def _open_and_dial(body: CaseIn, authorization):
         result = _run(lambda conn: _open(conn, authorization, body))
         if isinstance(result, JSONResponse):
-            return result
-        payload, dial = result
+            return result, None
+        payload, dial, opened = result
         if dial is None:
-            return JSONResponse(payload, status_code=201)
+            return JSONResponse(payload, status_code=201), opened
         phone, case_id, attempt_id = dial
         try:
             ref = call_provider.place(phone, case_id=case_id)
@@ -729,8 +897,8 @@ def create_app(
         after = _run(lambda conn: _after_dial(conn, case_id, attempt_id, ref, failed))
         if isinstance(after, JSONResponse):
             # The case is committed and stays `calling`; its timers decide it.
-            return JSONResponse(payload, status_code=201)
-        return JSONResponse(after, status_code=201)
+            return JSONResponse(payload, status_code=201), opened
+        return JSONResponse(after, status_code=201), opened
 
     @app.get("/v1/cases/{case_id}/call-code")
     def get_call_code(case_id: str, authorization: str | None = Header(default=None)):
@@ -1281,7 +1449,7 @@ def create_app(
             if isinstance(number, str) and number != "":
                 attempt_id = record_call_attempt(conn, case_id, now=now)
                 dial = (number, case_id, attempt_id)
-        return _present(conn, view), dial
+        return _present(conn, view), dial, (case_id, user["locale"])
 
     def _after_dial(conn, case_id, attempt_id, ref, failed: bool) -> dict:
         now = _now()

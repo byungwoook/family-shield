@@ -26,6 +26,7 @@ from uuid import UUID
 
 from psycopg import errors as pg_errors
 from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
 
 from backend.codes import (
     OneTimeChallenge,
@@ -1045,6 +1046,80 @@ def add_family_event(
         """,
         (family_id, now, actor_user_id, step),
     )
+
+
+TEXT_RETENTION = timedelta(days=30)
+
+
+def save_analysis(
+    conn,
+    case_id: UUID,
+    *,
+    now: datetime,
+    transcript: str | None = None,
+    claims: dict | None = None,
+    pattern_id: str | None = None,
+    audio_deleted: bool = False,
+) -> None:
+    """Store what the voice note said. Never touches state, result, or the timeline.
+
+    Writes only the columns passed as non-None. `audio_deleted` stamps
+    `audio_deleted_at` (the first stamp wins). A case already past the text
+    retention window keeps its text deleted.
+    """
+    _require_aware(now, "now")
+    _execute(
+        conn,
+        """
+        UPDATE cases
+        SET transcript = CASE
+                WHEN %s::text IS NULL THEN transcript
+                WHEN decided_at IS NOT NULL AND decided_at <= %s THEN NULL
+                ELSE %s::text END,
+            claims = CASE
+                WHEN %s::jsonb IS NULL THEN claims
+                WHEN decided_at IS NOT NULL AND decided_at <= %s THEN NULL
+                ELSE %s::jsonb END,
+            pattern_id = COALESCE(%s, pattern_id),
+            audio_deleted_at = CASE
+                WHEN %s THEN COALESCE(audio_deleted_at, %s)
+                ELSE audio_deleted_at END
+        WHERE id = %s
+        """,
+        (
+            transcript,
+            now - TEXT_RETENTION,
+            transcript,
+            None if claims is None else Jsonb(claims),
+            now - TEXT_RETENTION,
+            None if claims is None else Jsonb(claims),
+            pattern_id,
+            audio_deleted,
+            now,
+            case_id,
+        ),
+    )
+
+
+def purge_case_text(conn, *, now: datetime, retention: timedelta = TEXT_RETENTION) -> int:
+    """Delete the transcript, the parent's text, and the claims of cases decided
+    at least `retention` ago. The result, the pattern id, the timeline, and the
+    member stay. Returns how many cases changed. The caller commits.
+    """
+    _require_aware(now, "now")
+    rows = _all(
+        conn,
+        """
+        UPDATE cases
+        SET transcript = NULL, parent_text = '', claims = NULL
+        WHERE decided_at IS NOT NULL
+          AND decided_at <= %s
+          AND (transcript IS NOT NULL OR parent_text <> '' OR claims IS NOT NULL)
+        RETURNING id
+        """,
+        (now - retention,),
+    )
+    return len(rows)
 
 
 def call_code(conn, case_id: UUID, *, now: datetime) -> str | None:
