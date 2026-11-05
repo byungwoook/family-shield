@@ -19,6 +19,13 @@ confirm or reject. Outside DEV_AUTH=1, boot requires both sign-in
 audiences and a Twilio sender, so `DevOtp` cannot be the production path.
 The SMS, like the call, is sent only after the commit.
 
+Milestone 16: a child with no app. The parent types the number they
+already have (`/call-only`); that confirms it but is not the child's
+opt-in. The number gets an SMS link to `/allow/{secret}`, where the child
+taps Allow, proves the number with an SMS code, and sets the 4-digit check
+code. The parent never sees it. A new link (`/allow-link`) resets a
+forgotten code without moving `phone_current_since`.
+
 Milestone 15: a child changes their number after the device biometric and
 an OTP to the new number. It waits as `pending_phone_e164` until a parent
 confirms; the confirm moves it in one transaction, ends every open case
@@ -68,10 +75,11 @@ from uuid import UUID, uuid4
 
 from fastapi import BackgroundTasks, FastAPI, Header, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
+from backend import allow_page
 from backend.analysis import Analyst, cartesia_transcriber, stt_language
 from backend.calls import (
     PROMPTS_DIR,
@@ -90,6 +98,7 @@ from backend.codes import (
     DerivationKeyError,
 )
 from backend.enroll import (
+    ALLOW_TTL,
     INVITE_TTL,
     OTP_CHANNELS,
     OTP_MAX_ATTEMPTS,
@@ -97,9 +106,12 @@ from backend.enroll import (
     OTP_TTL,
     DevOtp,
     TwilioOtp,
+    allow_secret_ok,
     format_invite,
+    hash_allow,
     hash_invite,
     hash_otp,
+    new_allow_secret,
     new_invite_secret,
     new_otp_code,
     normalize_invite,
@@ -114,6 +126,7 @@ from backend.store import (
     RateLimited,
     accept_invite,
     active_parent,
+    allow_link_member,
     call_attempt,
     call_code,
     add_family_event,
@@ -131,11 +144,13 @@ from backend.store import (
     ensure_user,
     family_roster,
     clear_push_token,
+    complete_allow_link,
     confirm_phone_change,
     family_push_targets,
     due_case_ids,
     expire_case,
     finish_attempt,
+    issue_allow_link,
     issue_invite,
     load_case,
     lock_case,
@@ -153,6 +168,7 @@ from backend.store import (
     set_push_token,
     supersede_push_attempts,
     session_user,
+    set_call_only_phone,
     set_check_code,
     start_phone_otp,
     submit_digits,
@@ -199,6 +215,7 @@ _VALUE_ERRORS = {
     "member_not_pending": (409, "member_not_pending"),
     "no_pending_number": (409, "no_pending_number"),
     "no_current_phone": (409, "no_current_phone"),
+    "not_call_only": (409, "not_call_only"),
 }
 
 
@@ -280,6 +297,11 @@ class OtpCheckIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     phone_e164: str = Field(max_length=16)
     code: str = Field(max_length=16)
+
+
+class CallOnlyIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    phone_e164: str = Field(max_length=16)
 
 
 class PushTokenIn(BaseModel):
@@ -617,6 +639,7 @@ def boot(environ: Mapping[str, str] | None = None) -> FastAPI:
         transcriber=cartesia_transcriber() if get("CARTESIA_API_KEY") else None,
         push_sender=push_sender,
         timer_seconds=timer_seconds,
+        public_base_url=voice_settings["PUBLIC_BASE_URL"] or None,
     )
 
 
@@ -640,6 +663,8 @@ def create_app(
     audio_dir: str | None = None,
     push_sender=None,
     timer_seconds: float | None = None,
+    public_base_url: str | None = None,
+    allow_secrets: Callable[[], str] = new_allow_secret,
 ) -> FastAPI:
     """Routes for one product process. Dependencies are injected.
 
@@ -654,6 +679,7 @@ def create_app(
     nothing and the 90-second window falls through to the call. With
     `timer_seconds`, a background loop runs `tick` that often; tests call
     `app.state.tick()` themselves.
+    `public_base_url` is the https origin the allow-link SMS points at.
     """
     verifiers = dict(verifiers or {})
     @asynccontextmanager
@@ -1069,6 +1095,176 @@ def create_app(
                 await run_in_threadpool(tick)
             except Exception as exc:
                 log.error("timer tick failed: %s", type(exc).__name__)
+
+    @app.post("/v1/families/{family_id}/members/{member_id}/call-only")
+    def post_call_only(
+        family_id: str,
+        member_id: str,
+        body: CallOnlyIn,
+        authorization: str | None = Header(default=None),
+    ):
+        return _with_link(_run(lambda conn: _call_only(conn, authorization, family_id, member_id, body)))
+
+    @app.post("/v1/families/{family_id}/members/{member_id}/allow-link")
+    def post_allow_link(
+        family_id: str,
+        member_id: str,
+        authorization: str | None = Header(default=None),
+    ):
+        return _with_link(_run(lambda conn: _reissue_allow(conn, authorization, family_id, member_id)))
+
+    def _with_link(result):
+        if isinstance(result, JSONResponse):
+            return result
+        payload, phone, secret = result
+        try:
+            otp_sender.notify(phone, allow_page.allow_sms(phone, _allow_url(secret)))
+        except Exception as exc:
+            log.error("allow link sms failed: %s", type(exc).__name__)
+            return _fail(502, "sms_failed")
+        return JSONResponse(payload, status_code=202)
+
+    def _allow_url(secret: str) -> str:
+        return f"{public_base_url.rstrip('/')}/allow/{secret}"
+
+    def _link_ready():
+        if otp_sender is None:
+            raise APIError(503, "otp_unavailable")
+        if not public_base_url:
+            raise APIError(503, "allow_link_unavailable")
+
+    def _new_allow(conn, member_id) -> tuple[str, str]:
+        secret = allow_secrets()
+        if not allow_secret_ok(secret):
+            raise APIError(500, "config")
+        issued = issue_allow_link(
+            conn, member_id, allow_hash=hash_allow(secret), expires_at=_now() + ALLOW_TTL
+        )
+        return issued["phone_e164"], secret
+
+    def _call_only(conn, authorization, family_id: str, member_id: str, body: CallOnlyIn):
+        _link_ready()
+        now = _now()
+        user = _user(conn, authorization)
+        member = _family_child(conn, user["user_id"], family_id, member_id)
+        phone_region(body.phone_e164)
+        set_call_only_phone(conn, member["id"], body.phone_e164, now=now, actor_user_id=user["user_id"])
+        phone, secret = _new_allow(conn, member["id"])
+        return {"status": "link_sent", "phone_last4": phone[-4:]}, phone, secret
+
+    def _reissue_allow(conn, authorization, family_id: str, member_id: str):
+        _link_ready()
+        user = _user(conn, authorization)
+        member = _family_child(conn, user["user_id"], family_id, member_id)
+        phone, secret = _new_allow(conn, member["id"])
+        add_family_event(
+            conn, member["family_id"], now=_now(), actor_user_id=user["user_id"],
+            step="allow_link_sent",
+        )
+        return {"status": "link_sent", "phone_last4": phone[-4:]}, phone, secret
+
+    def _html(text: str, status: int = 200) -> HTMLResponse:
+        return HTMLResponse(text, status_code=status, headers=allow_page.PAGE_HEADERS)
+
+    def _expired() -> HTMLResponse:
+        return _html(allow_page.message("en", "expired"), 404)
+
+    @app.get("/allow/{secret}")
+    def get_allow(secret: str):
+        if not allow_secret_ok(secret):
+            return _expired()
+        row = _run(lambda conn: allow_link_member(conn, hash_allow(secret), now=_now()))
+        if isinstance(row, JSONResponse) or row is None:
+            return _expired()
+        language = allow_page.page_language(row["phone_e164"])
+        return _html(
+            allow_page.landing(language, name=row["display_name"], action=f"/allow/{secret}/otp")
+        )
+
+    @app.post("/allow/{secret}/otp")
+    def post_allow_otp(secret: str):
+        if not allow_secret_ok(secret) or otp_sender is None:
+            return _expired()
+        result = _run(lambda conn: _allow_otp(conn, secret))
+        if isinstance(result, JSONResponse):
+            return _expired()
+        if isinstance(result, HTMLResponse):
+            return result
+        phone, code = result
+        language = allow_page.page_language(phone)
+        try:
+            otp_sender.send(phone, code, channel="sms")
+        except Exception as exc:
+            log.error("allow otp sms failed: %s", type(exc).__name__)
+            return _html(allow_page.message(language, "sms_failed"), 502)
+        return _html(
+            allow_page.code_form(language, last4=phone[-4:], action=f"/allow/{secret}/confirm")
+        )
+
+    def _allow_otp(conn, secret: str):
+        now = _now()
+        row = allow_link_member(conn, hash_allow(secret), now=now, lock=True)
+        if row is None:
+            return _expired()
+        phone = row["phone_e164"]
+        code = otp_codes()
+        try:
+            start_phone_otp(
+                conn, row["id"], phone, code_hash=hash_otp(phone, code), now=now,
+                expires_at=now + OTP_TTL, daily_limit=OTP_SENDS_PER_DAY,
+            )
+        except RateLimited:
+            return _html(allow_page.message(allow_page.page_language(phone), "limited"), 429)
+        return phone, code
+
+    @app.post("/allow/{secret}/confirm")
+    async def post_allow_confirm(secret: str, request: Request):
+        if not allow_secret_ok(secret):
+            return _expired()
+        try:
+            form = await request.form(max_files=0, max_fields=3)
+            fields = {key: value for key, value in form.items() if isinstance(value, str)}
+        except Exception:
+            fields = {}
+        return await run_in_threadpool(_allow_confirm_tx, secret, fields)
+
+    def _allow_confirm_tx(secret: str, fields: dict):
+        result = _run(lambda conn: _allow_confirm(conn, secret, fields))
+        return _expired() if isinstance(result, JSONResponse) else result
+
+    def _allow_confirm(conn, secret: str, fields: dict):
+        now = _now()
+        row = allow_link_member(conn, hash_allow(secret), now=now, lock=True)
+        if row is None:
+            return _expired()
+        phone = row["phone_e164"]
+        language = allow_page.page_language(phone)
+        action = f"/allow/{secret}/confirm"
+        otp = fields.get("otp", "").strip()
+        code = fields.get("code", "").strip()
+        again = fields.get("again", "").strip()
+        if not (len(code) == 4 and code.isdigit() and code.isascii() and code == again):
+            # Checked before the OTP so a typo does not spend an attempt.
+            return _html(allow_page.code_form(language, last4=phone[-4:], action=action, error="bad_code"), 400)
+        outcome = check_phone_otp(
+            conn, row["id"], phone,
+            matches=lambda stored: otp_matches(phone, otp, stored),
+            now=now, max_attempts=OTP_MAX_ATTEMPTS,
+        )
+        if outcome == "dead":
+            return _html(allow_page.message(language, "otp_dead"), 400)
+        if outcome == "wrong":
+            return _html(allow_page.code_form(language, last4=phone[-4:], action=action, error="wrong_otp"), 400)
+        reset = row["code_set_at"] is not None
+        # The link and the SMS code are this child's authenticator here, as
+        # the biometric is in the app, so a reset counts as authorized.
+        set_check_code(conn, row["id"], code, now=now, biometric_ok=True, rng=rng)
+        complete_allow_link(conn, row["id"], now=now)
+        add_family_event(
+            conn, row["family_id"], now=now, actor_user_id=None,
+            step="call_only_code_reset" if reset else "call_only_allowed",
+        )
+        return _html(allow_page.done(language, reset=reset))
 
     @app.post("/v1/me/push-token")
     def post_push_token(body: PushTokenIn, authorization: str | None = Header(default=None)):

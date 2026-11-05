@@ -63,6 +63,9 @@ CREATE TABLE family_members (
     code_set_at timestamptz,
     invite_hash text,
     invite_expires_at timestamptz,
+    -- Milestone 16: the SMS allow link for a child with no app. Hash only.
+    allow_hash text,
+    allow_expires_at timestamptz,
     confirmed_by_parent_at timestamptz,
     created_at timestamptz NOT NULL,
     CONSTRAINT family_members_id_family_key UNIQUE (id, family_id),
@@ -148,6 +151,16 @@ CREATE TABLE family_members (
     ),
     CONSTRAINT family_members_invite_hash_not_plaintext CHECK (
         invite_hash IS NULL OR length(invite_hash) >= 32
+    ),
+    CONSTRAINT family_members_allow_parts CHECK (
+        (allow_hash IS NULL AND allow_expires_at IS NULL)
+        OR (allow_hash IS NOT NULL AND allow_expires_at IS NOT NULL)
+    ),
+    CONSTRAINT family_members_allow_hash_not_plaintext CHECK (
+        allow_hash IS NULL OR length(allow_hash) >= 32
+    ),
+    CONSTRAINT family_members_allow_is_call_only CHECK (
+        allow_hash IS NULL OR (role = 'child' AND user_id IS NULL)
     )
 );
 
@@ -161,6 +174,10 @@ CREATE UNIQUE INDEX family_members_phone_e164_active
 CREATE UNIQUE INDEX family_members_pending_phone_active
     ON family_members (pending_phone_e164)
     WHERE status <> 'removed' AND pending_phone_e164 IS NOT NULL;
+
+CREATE UNIQUE INDEX family_members_allow_hash_key
+    ON family_members (allow_hash)
+    WHERE allow_hash IS NOT NULL;
 
 -- An invite is found by its hash (milestone 5), so two live rows cannot share one.
 CREATE UNIQUE INDEX family_members_invite_hash_key

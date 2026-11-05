@@ -998,7 +998,7 @@ def family_roster(conn, family_id: UUID) -> list:
         """
         SELECT id, role, display_name, status, user_id, phone_e164,
                phone_opted_in_at, confirmed_by_parent_at, code_set_at,
-               invite_expires_at, pending_phone_e164
+               invite_expires_at, pending_phone_e164, allow_expires_at
         FROM family_members
         WHERE family_id = %s AND status <> 'removed'
         ORDER BY created_at ASC, id ASC
@@ -1028,6 +1028,8 @@ def family_roster(conn, family_id: UUID) -> list:
                     and row["phone_opted_in_at"] is not None
                 ),
                 "invite_expires_at": row["invite_expires_at"],
+                "call_only": row["user_id"] is None and row["phone_e164"] is not None,
+                "allow_link_open": row["allow_expires_at"] is not None,
                 "confirmed_at": row["confirmed_by_parent_at"],
             }
         )
@@ -1194,6 +1196,114 @@ def expire_case(conn, case_id: UUID, *, now: datetime, rng=None) -> dict | None:
     event, step = _TIMED_EVENTS[row["state"]]
     view = apply_case(conn, case_id, event, now=now, rng=rng, step=step)
     return view if view["state"] != row["state"] else None
+
+
+def set_call_only_phone(conn, member_id: UUID, phone_e164: str, *, now: datetime, actor_user_id: UUID) -> dict:
+    """Parent submits a number they already had for a child with no app (milestone 16).
+
+    Sets `phone_e164` and `confirmed_by_parent_at`, and not `phone_opted_in_at`:
+    the parent typing a number is not the child's opt-in. The app invite is
+    dropped, because this child will not sign in.
+    """
+    _require_aware(now, "now")
+    _require_e164(phone_e164)
+    row = _one(
+        conn,
+        "SELECT family_id, role, status, user_id, phone_e164 FROM family_members WHERE id = %s FOR UPDATE",
+        (member_id,),
+    )
+    if row is None or row["role"] != "child":
+        raise CaseNotFound(str(member_id))
+    if row["status"] != "invited" or row["user_id"] is not None or row["phone_e164"] is not None:
+        raise ValueError("not_call_only")
+    _assert_phone_available(conn, phone_e164, member_id=member_id, pending=False)
+    _execute(
+        conn,
+        """
+        UPDATE family_members
+        SET phone_e164 = %s, confirmed_by_parent_at = %s,
+            invite_hash = NULL, invite_expires_at = NULL
+        WHERE id = %s
+        """,
+        (phone_e164, now, member_id),
+    )
+    add_family_event(conn, row["family_id"], now=now, actor_user_id=actor_user_id, step="call_only_number_added")
+    return {"family_id": row["family_id"]}
+
+
+def issue_allow_link(conn, member_id: UUID, *, allow_hash: str, expires_at: datetime) -> dict:
+    """Store a new allow-link hash for a call-only child. A new link replaces the old one.
+
+    Legal while the child has a number and no account: the first opt-in, or a
+    forgotten-code reset later.
+    """
+    _require_aware(expires_at, "expires_at")
+    if not isinstance(allow_hash, str) or len(allow_hash) < 32:
+        raise ValueError("token_hash_too_short")
+    row = _one(
+        conn,
+        """
+        SELECT family_id, role, status, user_id, phone_e164, confirmed_by_parent_at
+        FROM family_members WHERE id = %s FOR UPDATE
+        """,
+        (member_id,),
+    )
+    if row is None or row["role"] != "child":
+        raise CaseNotFound(str(member_id))
+    if (
+        row["user_id"] is not None
+        or row["phone_e164"] is None
+        or row["status"] == "removed"
+        or row["confirmed_by_parent_at"] is None
+    ):
+        raise ValueError("not_call_only")
+    _execute(
+        conn,
+        "UPDATE family_members SET allow_hash = %s, allow_expires_at = %s WHERE id = %s",
+        (allow_hash, expires_at, member_id),
+    )
+    return {"family_id": row["family_id"], "phone_e164": row["phone_e164"]}
+
+
+def allow_link_member(conn, allow_hash: str, *, now: datetime, lock: bool = False) -> dict | None:
+    """The call-only child behind a live allow link, or None (unknown, used, or expired)."""
+    _require_aware(now, "now")
+    row = _one(
+        conn,
+        """
+        SELECT m.id, m.family_id, m.display_name, m.phone_e164, m.status,
+               m.phone_opted_in_at, m.code_set_at, m.allow_expires_at,
+               f.name AS family_name
+        FROM family_members AS m
+        JOIN families AS f ON f.id = m.family_id
+        WHERE m.allow_hash = %s AND m.user_id IS NULL AND m.status <> 'removed'
+        """ + (" FOR UPDATE OF m" if lock else ""),
+        (allow_hash,),
+    )
+    if row is None or now >= row["allow_expires_at"]:
+        return None
+    return row
+
+
+def complete_allow_link(conn, member_id: UUID, *, now: datetime) -> None:
+    """The child allowed calls and set a code: opt in, burn the link.
+
+    The first completion sets `phone_opted_in_at` and `phone_current_since` and
+    makes the child active. A reset keeps both clocks.
+    """
+    _require_aware(now, "now")
+    _execute(
+        conn,
+        """
+        UPDATE family_members
+        SET status = 'active',
+            phone_opted_in_at = COALESCE(phone_opted_in_at, %s),
+            phone_current_since = COALESCE(phone_current_since, %s),
+            allow_hash = NULL, allow_expires_at = NULL
+        WHERE id = %s
+        """,
+        (now, now, member_id),
+    )
 
 
 CASES_PER_CHILD_PER_DAY = 5
