@@ -65,7 +65,7 @@ from backend.api import (
     phone_region,
     public_case,
 )
-from backend.store import apply_schema, call_code
+from backend.store import add_member, apply_schema, call_code
 from services.code_webhook import _digits, _yes_no
 
 
@@ -1144,7 +1144,7 @@ def test_the_same_phone_cannot_be_activated_twice(world):
 
 
 def test_a_locked_static_code_does_not_dial(world):
-    client, clock, provider, _conn = world
+    client, clock, provider, conn = world
     parent, member_id, phone, _opened = call_only(client, clock, advance=False)
     # call_only already placed one call and the code was set at the same
     # timestamp as a later guess would use. Step the clock so the mismatches
@@ -1161,7 +1161,18 @@ def test_a_locked_static_code_does_not_dial(world):
         done = post_digits(client, parent["token"], opened.json()["id"], "0000")
         assert done.json()["result"] == "wrong"
     assert provider.calls == [f"would call {phone}"] * 5
-    locked = _open(client, parent["token"], member_id)
+    # One parent may open 5 cases per child per day (milestone 15), so the
+    # sixth comes from a second parent in the same family.
+    other = login(client, "Second parent")
+    family_id = conn.execute(
+        "SELECT family_id FROM family_members WHERE id = %s", (UUID(member_id),)
+    ).fetchone()[0]
+    add_member(
+        conn, family_id=family_id, role="parent", display_name="Second parent",
+        now=clock.now(), user_id=UUID(other["user_id"]), status="active",
+    )
+    conn.commit()
+    locked = _open(client, other["token"], member_id)
     assert locked.status_code == 201
     assert locked.json()["state"] == "not_confirmed"
     assert locked.json()["result"] == "code_locked"

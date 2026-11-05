@@ -750,12 +750,14 @@ def test_otp_routes_are_child_only(env):
     assert unauth.status_code == 401
 
 
-def test_a_confirmed_child_cannot_restart_otp_here(env):
+def test_a_confirmed_child_needs_the_biometric_to_change_number(env):
+    """Since milestone 15 a confirmed child's OTP is a number change."""
     client = env["client"]
     _parent, child, _family_id, _member_id, _phone = enrolled(env)
     response = start_otp(client, child["token"], next_phone())
-    assert response.status_code == 409
-    assert response.json() == {"error": "phone_already_set"}
+    assert response.status_code == 403
+    assert response.json() == {"error": "biometric_required"}
+    assert env["sms"].sent[-1][0] == _phone
 
 
 def test_a_failed_sms_is_502_and_still_counts(env):

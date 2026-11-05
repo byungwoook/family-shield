@@ -19,6 +19,13 @@ confirm or reject. Outside DEV_AUTH=1, boot requires both sign-in
 audiences and a Twilio sender, so `DevOtp` cannot be the production path.
 The SMS, like the call, is sent only after the commit.
 
+Milestone 15: a child changes their number after the device biometric and
+an OTP to the new number. It waits as `pending_phone_e164` until a parent
+confirms; the confirm moves it in one transaction, ends every open case
+for that child as `timeout`, and restarts the 24-hour rule. Both steps
+push the parents and the child's device and text the number being
+replaced. A parent may open 5 cases per child and 10 in all per 24 hours.
+
 Milestone 8: a child with a push token is asked by APNs or FCM first
 (`backend.push`). `tick` applies passed deadlines: 90 s without an answer
 moves `waiting_push` to the call, and 180 s / 45 s end a call yellow. A
@@ -96,6 +103,7 @@ from backend.enroll import (
     new_invite_secret,
     new_otp_code,
     normalize_invite,
+    number_change_notice,
     otp_matches,
 )
 from backend.push import push_from_env
@@ -112,6 +120,8 @@ from backend.store import (
     add_member,
     apply_case,
     check_phone_otp,
+    CASES_PER_CHILD_PER_DAY,
+    CASES_PER_PARENT_PER_DAY,
     child_membership,
     complete_phone_otp,
     confirm_member,
@@ -121,6 +131,8 @@ from backend.store import (
     ensure_user,
     family_roster,
     clear_push_token,
+    confirm_phone_change,
+    family_push_targets,
     due_case_ids,
     expire_case,
     finish_attempt,
@@ -134,7 +146,9 @@ from backend.store import (
     record_call_attempt,
     push_target,
     record_push_attempt,
+    recent_case_counts,
     reject_member,
+    reject_phone_change,
     save_analysis,
     set_push_token,
     supersede_push_attempts,
@@ -183,6 +197,8 @@ _VALUE_ERRORS = {
     "invite_not_open": (409, "invite_not_open"),
     "member_not_ready": (409, "member_not_ready"),
     "member_not_pending": (409, "member_not_pending"),
+    "no_pending_number": (409, "no_pending_number"),
+    "no_current_phone": (409, "no_current_phone"),
 }
 
 
@@ -257,6 +273,7 @@ class OtpStartIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     phone_e164: str = Field(max_length=16)
     channel: str = Field(default="sms", max_length=8)
+    biometric_ok: bool = False
 
 
 class OtpCheckIn(BaseModel):
@@ -1061,7 +1078,14 @@ def create_app(
         user = _user(conn, authorization)
         member = child_membership(conn, user["user_id"])
         if member is None:
-            raise APIError(403, "not_a_child")
+            # Milestone 15: parents get number-change notices on their device.
+            parents = [
+                row for row in memberships_for_user(conn, user["user_id"])
+                if row["role"] == "parent" and row["status"] == "active"
+            ]
+            if len(parents) != 1:
+                raise APIError(403, "not_a_member")
+            member = parents[0]
         token = body.token.strip()
         if token == "" or any(ch.isspace() for ch in token) or body.locale not in ("en", "ko"):
             raise APIError(400, "invalid_body")
@@ -1298,7 +1322,26 @@ def create_app(
     def post_otp_check(body: OtpCheckIn, authorization: str | None = Header(default=None)):
         if otp_sender is None:
             return _fail(503, "otp_unavailable")
-        return _run(lambda conn: _otp_check(conn, authorization, body))
+        return _with_notices(_run(lambda conn: _otp_check(conn, authorization, body)))
+
+    @app.post("/v1/families/{family_id}/members/{member_id}/phone-change")
+    def post_phone_change(
+        family_id: str,
+        member_id: str,
+        body: DecisionIn,
+        authorization: str | None = Header(default=None),
+    ):
+        return _with_notices(
+            _run(lambda conn: _phone_change(conn, authorization, family_id, member_id, body))
+        )
+
+    def _with_notices(result):
+        """Send the notices a committed change asked for, then answer."""
+        if isinstance(result, JSONResponse):
+            return result
+        payload, notices = result
+        _send_notices(notices)
+        return payload
 
     def _new_session(conn, user_id, now) -> str:
         token = tokens()
@@ -1434,7 +1477,14 @@ def create_app(
         member = _enrolling_child(conn, user["user_id"])
         if body.channel not in OTP_CHANNELS:
             raise APIError(400, "invalid_body")
-        if member["status"] != "invited" or member["phone_e164"] is not None:
+        changing = member["status"] == "active" and member["phone_e164"] is not None
+        if changing:
+            # A number change needs the device biometric, like a code reset.
+            if not body.biometric_ok:
+                raise APIError(403, "biometric_required")
+            if body.phone_e164 == member["phone_e164"]:
+                raise APIError(409, "same_number")
+        elif member["status"] != "invited" or member["phone_e164"] is not None:
             raise APIError(409, "phone_already_set")
         phone = body.phone_e164
         phone_region(phone)
@@ -1463,8 +1513,11 @@ def create_app(
         member = _enrolling_child(conn, user["user_id"])
         phone = body.phone_e164
         phone_region(phone)
-        if member["phone_e164"] is not None:
+        changing = member["status"] == "active" and member["phone_e164"] is not None
+        if member["phone_e164"] is not None and not changing:
             raise APIError(409, "phone_already_set")
+        if changing and phone == member["phone_e164"]:
+            raise APIError(409, "same_number")
         outcome = check_phone_otp(
             conn,
             member["id"],
@@ -1478,6 +1531,21 @@ def create_app(
             return _fail(400, "otp_expired")
         if outcome == "wrong":
             return _fail(400, "otp_wrong")
+        if changing:
+            # The new number waits for a parent. The old one is still dialed.
+            complete_phone_otp(conn, member["id"], phone, now=now, pending=True)
+            add_family_event(
+                conn,
+                member["family_id"],
+                now=now,
+                actor_user_id=user["user_id"],
+                step="number_change_requested",
+            )
+            notices = _change_notices(
+                conn, member["family_id"], member["id"], member["phone_e164"],
+                "number_change_requested",
+            )
+            return {"status": "pending_parent", "phone_last4": phone[-4:]}, notices
         complete_phone_otp(conn, member["id"], phone, now=now)
         add_family_event(
             conn,
@@ -1486,7 +1554,53 @@ def create_app(
             actor_user_id=user["user_id"],
             step="phone_verified",
         )
-        return {"status": "verified", "phone_last4": phone[-4:]}
+        return {"status": "verified", "phone_last4": phone[-4:]}, []
+
+    def _change_notices(conn, family_id, member_id, old_phone: str, kind: str) -> list:
+        """Who hears about a number change: every parent device, the child's
+        current device, and an SMS to the number being replaced."""
+        notices = [("push", target) for target in family_push_targets(conn, family_id, role="parent")]
+        child_target = push_target(conn, member_id)
+        if child_target is not None:
+            notices.append(("push", child_target))
+        notices.append(("sms", old_phone))
+        return [(channel, value, kind, family_id) for channel, value in notices]
+
+    def _send_notices(notices: list) -> None:
+        for channel, value, kind, family_id in notices:
+            try:
+                if channel == "push" and push_sender is not None:
+                    push_sender.send(
+                        provider=value["provider"], token=value["token"], env=value["env"],
+                        locale=value["locale"], case_id=family_id, kind=kind,
+                    )
+                elif channel == "sms" and otp_sender is not None:
+                    otp_sender.notify(value, number_change_notice(value))
+            except Exception as exc:
+                log.error("%s notice failed: %s", channel, type(exc).__name__)
+
+    def _phone_change(conn, authorization, family_id: str, member_id: str, body: DecisionIn):
+        now = _now()
+        user = _user(conn, authorization)
+        if body.decision not in ("confirm", "reject"):
+            raise APIError(400, "invalid_body")
+        member = _family_child(conn, user["user_id"], family_id, member_id)
+        if body.decision == "reject":
+            reject_phone_change(conn, member["id"], now=now, actor_user_id=user["user_id"])
+            return {"id": str(member["id"]), "status": "kept"}, []
+        moved = confirm_phone_change(conn, member["id"], now=now, actor_user_id=user["user_id"])
+        notices = _change_notices(
+            conn, moved["family_id"], member["id"], moved["old_phone"], "number_change_confirmed"
+        )
+        return (
+            {
+                "id": str(member["id"]),
+                "status": "changed",
+                "phone_last4": moved["new_phone"][-4:],
+                "cancelled_cases": len(moved["cancelled"]),
+            },
+            notices,
+        )
 
     def _dev_login(conn, body: DevLoginIn) -> dict:
         now = _now()
@@ -1615,6 +1729,14 @@ def create_app(
             raise APIError(404, "not_found")
         if not child_callable(member):
             raise APIError(400, "member_not_callable")
+        counts = recent_case_counts(
+            conn, child_member_id=member["id"], opened_by=user["user_id"], now=now
+        )
+        if (
+            counts["child"] >= CASES_PER_CHILD_PER_DAY
+            or counts["parent"] >= CASES_PER_PARENT_PER_DAY
+        ):
+            raise APIError(429, "rate_limited")
         case_id = open_case(
             conn,
             family_id=member["family_id"],
