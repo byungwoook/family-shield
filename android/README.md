@@ -22,6 +22,7 @@ Gradle properties:
 | `fsGoogleServerClientId` | Google "server" (web) client id, the backend's `GOOGLE_SERVER_CLIENT_ID`. Blank: the Google button is hidden. |
 | `fsApplicationId` | Application id. Default `com.familyshield.app`. |
 | `fsE2eBase` | When set, `ParentFlowE2eTest` runs against that DEV_AUTH backend. Otherwise the test is skipped. |
+| `fsOutboundCallerId` | The one number labeled "Family Shield". Default `+15555550100`, a placeholder, not a Twilio account. Set it to `TWILIO_FROM_NUMBER` for a real call. |
 
 A real device uses `-PfsApiBase=http://<your-lan-ip>:8000`. Release builds set `DEV_LOGIN=false`, omit the developer sign-in strings and fields (those live in `src/debug` only), and refuse cleartext (the debug manifest is the only place that allows HTTP, and only for `10.0.2.2`, `localhost`, and `127.0.0.1`).
 
@@ -45,6 +46,10 @@ The question opens from a push (`kind=money_request`, `case_id`). There is no ch
 
 `BiometricPrompt` asks for a strong biometric. On API 30 and later the same prompt can fall back to the device passcode. On API 28–29 the platform cannot combine the two, so a device that has a strong biometric is offered only that. A device with none gets the passcode, so the child is not locked out.
 
+## Label our outbound number (milestone 17)
+
+Optional. The check code works without it. On the child home and the waiting screen, "Open the system setting" asks for `ROLE_CALL_SCREENING`. Only one app can hold that role, so granting it replaces another screening app. `OutboundCallScreeningService` calls `respondToCall` before it shows anything, allows the call to ring, and does not read audio. For the configured caller id only, it then launches `CallerLabelActivity`, which says "Family Shield". Any other number, including the child's, is allowed and not labeled. The app does not request `READ_CONTACTS`. A number the child already saved as a contact keeps that contact's name, because the platform does not hand a saved contact to a screening app without that permission. The number is `fsOutboundCallerId`, default `+15555550100`. There is no backend route: the owner sets the same E.164 as `TWILIO_FROM_NUMBER` at build time.
+
 ## Share a voice note (milestone 13)
 
 `MainActivity` is `singleTop` and accepts `ACTION_SEND` for `audio/*`, `text/plain`, and `application/ogg`. The file is copied into the app cache and the new-case screen opens with it attached. `POST /v1/cases` runs only when the parent taps Verify. Text alone stays JSON. A voice note is multipart (`child_member_id`, `text`, file `audio`) with `Content-Length` set. The part must be `audio/*` and at most 10 MB (10 485 760 bytes); a larger or empty file is refused on the phone and is not uploaded.
@@ -61,4 +66,4 @@ KakaoTalk on a real phone is not a merge gate. What Kakao's help does and does n
 ./gradlew testDebugUnitTest -PfsE2eBase=http://127.0.0.1:8000 --tests '*ParentFlowE2eTest'
 ```
 
-Unit tests cover the API client (MockWebServer, including a multipart voice note with `Content-Length`, and the child routes), result copy, verify gating, polling with virtual time, session encryption, string-table parity, voice-note types and the 10 MB cap, and the share intent (a draft is stored locally and is not uploaded until Verify). Robolectric Compose tests cover an empty family, a child who is not confirmed (Verify disabled), a yellow result, a red result, the Korean red copy, a shared voice note that stays on the draft until Verify is tapped, Not now leaving the question unanswered, the 6-digit code staying off screen until it is revealed, and the check-code reset hiding its fields until biometrics. There is no emulator on this Linux environment (no KVM), so sharing from the Files app and approving BiometricPrompt are not run here.
+Unit tests cover the API client (MockWebServer, including a multipart voice note with `Content-Length`, and the child routes), result copy, verify gating, polling with virtual time, session encryption, string-table parity, voice-note types and the 10 MB cap, the share intent (a draft is stored locally and is not uploaded until Verify), and the outbound-number label (one configured number, every call allowed to ring, no contacts permission). Robolectric Compose tests cover an empty family, a child who is not confirmed (Verify disabled), a yellow result, a red result, the Korean red copy, a shared voice note that stays on the draft until Verify is tapped, Not now leaving the question unanswered, the 6-digit code staying off screen until it is revealed, the check-code reset hiding its fields until biometrics, the optional call-label control, and the caller-id banner. There is no emulator on this Linux environment (no KVM), so sharing from the Files app, approving BiometricPrompt, and granting call screening are not run here.

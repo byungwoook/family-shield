@@ -41,5 +41,24 @@
                 <data android:mimeType="application/ogg" />
             </intent-filter>
         </activity>
+        <!-- The system binds this. Contacts and call audio stay out of this app. -->
+        <service
+            android:name=".call.OutboundCallScreeningService"
+            android:exported="true"
+            android:permission="android.permission.BIND_SCREENING_SERVICE">
+            <intent-filter>
+                <action android:name="android.telecom.CallScreeningService" />
+            </intent-filter>
+        </service>
+        <activity
+            android:name=".call.CallerLabelActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:showWhenLocked="true"
+            android:theme="@style/Theme.FamilyShield.CallerLabel"
+            android:turnScreenOn="true" />
     </application>
 </manifest>

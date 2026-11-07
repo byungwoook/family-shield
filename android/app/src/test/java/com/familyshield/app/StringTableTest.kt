@@ -45,6 +45,12 @@ class StringTableTest {
             "Did you send your family a message asking for money?",
             english.getValue("child_question"),
         )
+        assertTrue(english.getValue("outbound_label_body").startsWith("Optional."))
+        assertTrue(english.getValue("outbound_label_body").contains("check code works without this"))
+        assertTrue(!english.getValue("outbound_label_body").lowercase().contains("verified"))
+        assertTrue(!korean.getValue("outbound_label_body").lowercase().contains("verified"))
+        assertEquals("Family Shield is calling for your family.", english.getValue("caller_label_body"))
+        assertEquals("패밀리 쉴드가 가족을 대신해 전화하고 있어요.", korean.getValue("caller_label_body"))
     }
 
     private fun unescape(raw: String) = raw

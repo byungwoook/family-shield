@@ -143,6 +143,7 @@ private struct WaitingView: View {
             Text(CopyCatalog.text(.childWaitingBody, locale))
         }
         Button(CopyCatalog.text(.childWaitingRefresh, locale), action: onRefresh)
+        OutboundLabelCard()
     }
 }
 
@@ -160,12 +161,41 @@ private struct HomeView: View {
         }
         Button(CopyCatalog.text(.childHomeReset, locale)) { model.requestReset() }
             .accessibilityIdentifier("reset_code")
+        OutboundLabelCard()
     }
 
     private func resultLine(_ item: ChildCase) -> String {
         if item.result == "sent" { return CopyCatalog.text(.childResultYes, locale) }
         if item.result == "not_sent" { return CopyCatalog.text(.childResultNo, locale) }
         return CopyCatalog.text(.childResultClosed, locale)
+    }
+}
+
+private struct OutboundLabelCard: View {
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var enabled = false
+    private var locale: AppLocale { AppLocale.resolve() }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(CopyCatalog.text(.outboundLabelTitle, locale)).font(.headline)
+            Text(CopyCatalog.text(enabled ? .outboundLabelOn : .outboundLabelOff, locale))
+            Text(CopyCatalog.text(.outboundLabelBody, locale)).font(.footnote)
+            Button(CopyCatalog.text(.outboundLabelOpenSettings, locale)) {
+                CallDirectoryLink.openSettings()
+            }
+            .accessibilityIdentifier("open_call_directory")
+        }
+        .accessibilityIdentifier("outbound_label")
+        .onAppear { refresh() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { refresh() }
+        }
+    }
+
+    private func refresh() {
+        CallDirectoryLink.reload()
+        CallDirectoryLink.refresh { enabled = $0 }
     }
 }
 

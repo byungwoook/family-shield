@@ -277,4 +277,11 @@
     <string name="error_otp_rate_limited">24시간 동안 보낼 수 있는 문자 코드 5회를 모두 썼어요. 나중에 다시 시도하세요.</string>
     <string name="error_otp_unavailable">이 서버에서는 지금 문자 코드를 보낼 수 없어요.</string>
     <string name="error_otp_sms_failed">문자가 전달되지 않았어요. 다시 시도해 주세요.</string>
+    <string name="outbound_label_title">패밀리 쉴드 전화 표시</string>
+    <string name="outbound_label_body">선택 사항입니다. 확인 번호만으로도 됩니다. 패밀리 쉴드가 거는 번호 하나만 Family Shield로 표시해서, 그 전화가 모르는 번호로 조용히 되지 않게 합니다. 본인의 번호나 다른 번호를 진짜라고 표시하지 않습니다. Android에서는 통화 스크리닝을 맡은 앱이 하나뿐이라, 이것을 켜면 다른 스크리닝 앱을 대신합니다.</string>
+    <string name="outbound_label_open_settings">시스템 설정 열기</string>
+    <string name="outbound_label_unavailable">이 휴대폰은 통화 스크리닝을 제공하지 않아요. 확인 번호는 그대로 쓸 수 있어요.</string>
+    <string name="outbound_label_on">전화 표시가 켜져 있어요.</string>
+    <string name="outbound_label_off">전화 표시가 꺼져 있어요. 확인 번호는 그대로 쓸 수 있어요.</string>
+    <string name="caller_label_body">패밀리 쉴드가 가족을 대신해 전화하고 있어요.</string>
 </resources>

@@ -45,6 +45,7 @@ import com.familyshield.app.data.ChildSource
 import com.familyshield.app.data.api.ApiException
 import com.familyshield.app.data.api.InviteAccepted
 import com.familyshield.app.domain.ChildRules
+import com.familyshield.app.ui.call.OutboundLabelCard
 import com.familyshield.app.ui.common.ErrorMessages
 import com.familyshield.app.ui.common.ErrorText
 import com.familyshield.app.ui.common.NoticeText
@@ -384,6 +385,7 @@ fun ChildWaitingContent(
         Button(onClick = onRefresh, modifier = Modifier.testTag("refresh_membership")) {
             Text(stringResource(R.string.child_waiting_refresh))
         }
+        OutboundLabelCard()
         notice?.let { NoticeText(it) }
         error?.let { ErrorText(it) }
     }
@@ -432,6 +434,7 @@ fun ChildHomeContent(
         TextButton(onClick = onReset, modifier = Modifier.testTag("reset_check_code")) {
             Text(stringResource(R.string.child_home_reset))
         }
+        OutboundLabelCard()
     }
 }
 

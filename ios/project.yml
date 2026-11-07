@@ -20,6 +20,8 @@ settings:
     DEVELOPMENT_TEAM: TEAMID
     CODE_SIGN_STYLE: Automatic
     TARGETED_DEVICE_FAMILY: "1,2"
+    # Placeholder outbound caller id. Not a Twilio account. Same value as -PfsOutboundCallerId.
+    FS_OUTBOUND_CALLER_ID: "+15555550100"
 packages:
   FamilyShieldCore:
     path: FamilyShieldCore
@@ -34,6 +36,8 @@ targets:
     dependencies:
       - package: FamilyShieldCore
       - target: FamilyShieldShare
+        embed: true
+      - target: FamilyShieldCallDirectory
         embed: true
     settings:
       base:
@@ -82,12 +86,29 @@ targets:
         CODE_SIGN_ENTITLEMENTS: ShareExtension/Share.entitlements
         SWIFT_VERSION: "5.0"
         SWIFT_STRICT_CONCURRENCY: minimal
+  FamilyShieldCallDirectory:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: CallDirectory
+    dependencies:
+      - package: FamilyShieldCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.familyshield.app.calldirectory
+        PRODUCT_NAME: FamilyShieldCallDirectory
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: CallDirectory/Info.plist
+        CODE_SIGN_ENTITLEMENTS: CallDirectory/CallDirectory.entitlements
+        SWIFT_VERSION: "5.0"
+        SWIFT_STRICT_CONCURRENCY: minimal
 schemes:
   FamilyShield:
     build:
       targets:
         FamilyShield: all
         FamilyShieldShare: all
+        FamilyShieldCallDirectory: all
         FamilyShieldUITests: [test]
     run:
       config: Debug

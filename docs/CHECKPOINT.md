@@ -1,15 +1,15 @@
 # 체크포인트: 어디까지 했고, 어떻게 이어가는지
 
-마지막 갱신: 2026-11-07. 백엔드 v1과 Android 부모·공유·자녀 앱(M12–M14)은 main에 병합돼 있다. 이 브랜치는 M11 iOS 자녀 화면(Face ID)이고, M10 공유 확장 위에 쌓여 있다. 시뮬레이터와 기기 확인, APNs 키는 아직 없다. 이 파일만 읽으면 바로 시작할 수 있게 쓴다.
+마지막 갱신: 2026-11-07. 백엔드 v1, Android(M12–M14), iOS(M9–M11)는 main(`772e5d5`)에 있다. 이 브랜치는 M17 발신 번호 표시다. 시뮬레이터·에뮬레이터·기기 확인은 아직 없다. 이 파일만 읽으면 바로 시작할 수 있게 쓴다.
 설계의 권위는 [PRODUCT_REDESIGN.md](PRODUCT_REDESIGN.md), API의 권위는 코드와 그것을 옮긴 [API_CONTRACT.md](API_CONTRACT.md)다.
 
 ## 1. 한 줄 요약
 
-백엔드는 v1 범위(M1–M8, M15, M16)가 main에 병합됐다. Android 부모 앱(M12), 공유 인텐트(M13), 자녀 화면(M14)도 main에 있다. M9·M10은 아래 브랜치에 있다. 이 브랜치는 거기에 M11 자녀 화면을 더한다. 초대 수락, +1/+82 번호와 문자 코드, 확인 번호 두 번, Face ID(기기 암호로 넘어감) 뒤 예/아니요, 통화 중 6자리, 확인 번호 재설정이다. 나중에(Not now)는 답을 올리지 않는다. 알림에는 예/아니요도 코드도 없다. `swift test`는 **33 passed**. 백엔드 경로는 추가하지 않았다. 백엔드는 `PGTZ=UTC`로 **682 passed, 1 skipped**(이 환경에는 Postgres가 없어 pytest를 다시 돌리지는 못했다. 백엔드 파일은 그대로다). Xcode 시뮬레이터와 Face ID 기기 확인, APNs 키는 남아 있다.
+백엔드 v1, Android M12–M14, iOS M9–M11은 main에 있다. 이 브랜치는 M17이다. iOS Call Directory 확장과 Android `CallScreeningService`가 번호 하나만 "Family Shield"로 표시한다. 그 번호는 빌드 설정의 자리표시자 `+15555550100`이고, Twilio 계정이 아니다. 자녀 번호는 넣지 않는다. 발신 번호를 받아 "verified"를 돌려주는 경로는 없다. 켜는 것은 선택이고, 확인 번호는 이것 없이 동작한다. 백엔드 경로는 추가하지 않았다. `swift test`는 **39 passed**(이전 33에 6을 더함). Android `assembleDebug`, `assembleRelease`, `testDebugUnitTest`는 **86 passed, 1 skipped**(이전 77 passed, 1 skipped에 9를 더함). 백엔드는 `PGTZ=UTC`로 **682 passed, 1 skipped**. 릴리스 APK에 `10.0.2.2`와 개발자 로그인 문구는 없다. Xcode와 에뮬레이터 확인은 [MANUAL_CHECKS.md](MANUAL_CHECKS.md) 12절에 적어 두었다.
 
 ## 2. PR 스택 (포크 `byungwoook/family-shield`, 원본에는 PR 없음)
 
-#5~#15는 main에 병합됐다. M9는 PR #16(`cursor/m9-ios-parent-4516`, base main). M10은 PR #17(`cursor/m10-ios-share-4516`, base M9). 이 브랜치(`cursor/m11-ios-child-4516`)는 M10 위에 M11만 더한다. GitHub는 Origin 스택을 지원하지 않아서, 각 PR의 베이스 브랜치로 쌓는다. diff는 그 마일스톤만 보인다.
+#5~#18은 main에 병합됐다. 이 브랜치(`cursor/m17-label-outbound-number-1a55`)는 main 위에 M17만 더한다. GitHub는 Origin 스택을 지원하지 않아서, 각 PR의 베이스 브랜치로 쌓는다. diff는 그 마일스톤만 보인다.
 
 | PR | 브랜치 | 내용 | 상태 |
 |---|---|---|---|
@@ -17,9 +17,10 @@
 | #13 | `claude/m12-android-parent` | M12 Android 부모 앱 | main에 병합. 에뮬레이터·FCM 기기 토큰은 여전히 수동 |
 | #14 | `cursor/m13-android-share-4d8a` | M13 Android 공유 인텐트 | main에 병합. 에뮬레이터 파일 공유와 카카오톡 수동 확인은 남음 |
 | #15 | `cursor/m14-android-child-308a` | M14 Android 자녀 화면 | main에 병합. 에뮬레이터 생체 인증과 FCM 기기 토큰은 남음 |
-| #16 | `cursor/m9-ios-parent-4516` | M9 iOS 부모 화면 | main 기준. 시뮬레이터 수동 확인과 APNs 기기 토큰은 남음 |
-| #17 | `cursor/m10-ios-share-4516` | M10 iOS 공유 확장 | M9 위에 쌓음. 시뮬레이터 파일 공유와 카카오톡은 남음 |
-| — | `cursor/m11-ios-child-4516` | M11 iOS 자녀 화면 | M10 위에 쌓음. Face ID와 APNs 기기 토큰은 남음 |
+| #16 | `cursor/m9-ios-parent-4516` | M9 iOS 부모 화면 | main에 병합. 시뮬레이터 수동 확인과 APNs 기기 토큰은 남음 |
+| #17 | `cursor/m10-ios-share-4516` | M10 iOS 공유 확장 | main에 병합. 시뮬레이터 파일 공유와 카카오톡은 남음 |
+| #18 | `cursor/m11-ios-child-4516` | M11 iOS 자녀 화면 | main에 병합. Face ID와 APNs 기기 토큰은 남음 |
+| #19 | `cursor/m17-label-outbound-number-1a55` | M17 발신 번호 표시 | main 기준. 기기에서 확장·역할을 켜는 확인은 남음 |
 | — | `wip/m12-android-partial` | 컴파일된 적 없는 초안. **병합 금지, 참고만** | 보관 |
 
 `claude/m12-android-parent`에 들어간 것:
@@ -46,10 +47,10 @@
 | M12 Android 부모 화면 | main (PR #13). JVM 테스트와 DEV_AUTH 스모크 통과. 에뮬레이터 수동 확인과 FCM 기기 토큰은 남음 |
 | M13 Android 공유 인텐트 | main (PR #14). `audio/*`·`text/plain`·`application/ogg` 공유가 초안이 되고, 확인을 눌러야 multipart로 올라간다. 10MB(10 485 760바이트)는 폰에서 거절. 에뮬레이터에서 파일 앱으로 공유하는 확인과 카카오톡 수동 확인은 남음 |
 | M14 Android 자녀 화면 | main (PR #15). JVM 77 passed, 1 skipped. 에뮬레이터 생체 인증과 FCM 기기 토큰은 남음. 백엔드 경로는 추가하지 않음 |
-| M9 iOS 부모 화면 | PR #16. SwiftUI + XcodeGen. `swift test`는 M10에서 27로 늘었다. 시뮬레이터 UI 테스트와 Apple 로그인 기기 확인은 남음 |
-| M10 iOS 공유 확장 | PR #17. `public.audio`·글·Ogg. 확인 전에 업로드하지 않음. 시뮬레이터 파일 앱 공유와 카카오톡은 남음 |
-| M11 iOS 자녀 화면 | **이 브랜치.** 초대·번호·OTP·확인 번호·Face ID 답변·통화 코드·재설정. `swift test` 33 passed. 기기 Face ID와 APNs 키는 남음. 백엔드 경로는 추가하지 않음 |
-| M17 발신 번호 표시(iOS/Android) | 시작 전 |
+| M9 iOS 부모 화면 | main (PR #16). 시뮬레이터 UI 테스트와 Apple 로그인 기기 확인은 남음 |
+| M10 iOS 공유 확장 | main (PR #17). 시뮬레이터 파일 앱 공유와 카카오톡은 남음 |
+| M11 iOS 자녀 화면 | main (PR #18). `swift test`는 그때 33. 기기 Face ID와 APNs 키는 남음 |
+| M17 발신 번호 표시(iOS/Android) | **이 브랜치, PR #19.** 번호 하나만 "Family Shield". 자리표시자 `+15555550100`. 백엔드 경로 없음. `swift test` 39. Android 86 passed, 1 skipped. 기기 확인은 남음 |
 | M18 해커톤 에이전트 코드 제거 | 마지막에. 앱 자녀 화면이 쓸 만해진 뒤 |
 | M19 Safe Wallet | v1 이후, 법률 검토 후 |
 
@@ -83,7 +84,7 @@
 ### 5.1 코드 받기
 ```bash
 git clone https://github.com/byungwoook/family-shield.git && cd family-shield
-git checkout cursor/m11-ios-child-4516   # M11. 베이스는 M10 (cursor/m10-ios-share-4516)
+git checkout cursor/m17-label-outbound-number-1a55   # M17. 베이스는 main
 ```
 
 ### 5.2 백엔드 (Python 3.13, Postgres)
@@ -251,6 +252,26 @@ venv/bin/uvicorn --factory backend.api:boot --host 0.0.0.0 --port 8000
 - 재설치하면 번호 화면이 다시 나온다. 서버가 `phone_already_set` 또는 `biometric_required`를 주면 코드를 바꾸지 않고 다음 단계로 간다.
 
 ### 5.10 그다음
-1. M17 발신 번호 표시.
-2. 키가 필요한 수동 확인([MANUAL_CHECKS.md](MANUAL_CHECKS.md)).
-3. M18.
+1. 키가 필요한 수동 확인([MANUAL_CHECKS.md](MANUAL_CHECKS.md), M17은 12절).
+2. M18 해커톤 에이전트 코드 제거. M17 브랜치 위에 쌓는다.
+3. M19 Safe Wallet은 시작하지 않는다.
+
+### 5.11 M17에서 된 것과 남은 것
+된 것 (이 브랜치):
+- iOS Call Directory 확장 `com.familyshield.app.calldirectory`. 식별 항목은 하나이고 라벨은 "Family Shield"다. 차단 항목은 없다. 번호는 `ios/project.yml`의 `FS_OUTBOUND_CALLER_ID`다. 기본값은 예약된 가상 번호 `+15555550100`이다.
+- Android `OutboundCallScreeningService`. `respondToCall`을 UI보다 먼저 호출하고, 모든 전화를 울리게 둔다. 설정된 번호에만 "Family Shield" 배너를 띄운다. 통화 음성은 읽지 않는다. `READ_CONTACTS`를 요청하지 않는다. 번호는 `-PfsOutboundCallerId`이고 기본값은 같은 자리표시자다.
+- 자녀 홈과 승인 대기 화면에 선택 항목이 있다. iOS는 시스템 전화 식별 설정을, Android 10 이상은 `ROLE_CALL_SCREENING` 요청을 연다. Android 9 이하는 버튼 대신 확인 번호가 그대로 쓴다는 문장을 보여 준다. 이 역할은 앱 하나만 가질 수 있다.
+- 백엔드 경로는 만들지 않았다. `docs/API_CONTRACT.md`도 그대로다. 소유자가 실번호를 넣으면 `TWILIO_FROM_NUMBER`와 같은 E.164를 빌드 설정에만 둔다. 그 값은 커밋하지 않아도 된다.
+- 테스트: 디렉터리가 번호 하나인지, 두 번째 번호는 거절하는지, 자녀 번호는 그 항목에 없는지, 우리 전화는 표시하고 그 밖은 표시하지 않는지, 어떤 전화도 끊거나 조용히 하지 않는지. `swift test` **39 passed**. Android **86 passed, 1 skipped**. `assembleDebug`, `assembleRelease` 통과. 릴리스 APK에 `10.0.2.2`와 개발자 로그인 문구는 없다.
+- 백엔드는 고치지 않았다. Python 3.12와 Postgres 16에서 `PGTZ=UTC`로 **682 passed, 1 skipped**.
+- Call Directory Info.plist는 Python `plistlib`으로 읽었다. 확장 지점은 `com.apple.callkit.call-directory`이고, 요청 종류는 `phoneNumberIdentification`뿐이다.
+
+남은 것:
+- Mac에서 확장을 켜고, Android에서 역할을 허용한 뒤, 실제 Twilio 번호로 전화가 "Family Shield"로 보이는지. 자녀 번호로 온 전화는 그렇게 보이면 안 된다. [MANUAL_CHECKS.md](MANUAL_CHECKS.md) 12절. 이 환경에는 Xcode도 KVM도 없다.
+- M9–M14에서 남은 시뮬레이터·에뮬레이터 수동 확인, 카카오톡, APNs, FCM, 릴리스 서명.
+
+소유자가 볼 결정:
+- 실번호는 서버 환경 변수가 아니라 앱 빌드 설정이다. 백엔드에 번호를 내려주는 경로는 만들지 않았다. 번호를 바꾸면 앱을 다시 빌드한다.
+- 기본 번호 `+15555550100`은 555-0100 대역의 가상 번호다. 운영 전화가 이 번호로 표시되려면 `-PfsOutboundCallerId`와 `FS_OUTBOUND_CALLER_ID`를 `TWILIO_FROM_NUMBER`로 맞춘다.
+- Android는 이 역할이 없는 다른 스크리닝 앱을 대체한다. 안내 문장에 그 사실을 적었다. 이미 연락처에 저장된 번호는 그 이름이 남는다. 연락처 권한을 받지 않기 때문이다.
+- 배너는 수신 화면을 가리지 않게 위쪽에 두고, 포커스를 가져가지 않는다. "Family Shield"와 가족을 대신해 전화한다는 문장만 있다.

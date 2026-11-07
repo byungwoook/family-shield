@@ -137,8 +137,10 @@ in another time zone who can't easily reach their child and feels pressure to pa
 - **One phone number per student, no backup contact.** If the student doesn't answer, the result is 🟡.
 - **Quick tunnels expire.** A `trycloudflare.com` URL changes every time cloudflared restarts; update
   `CODE_WEBHOOK_URL` and rerun `cartesia_setup` when it does (or use a named Cloudflare tunnel).
-- **iPhone call screening** can silence the verification call from an unknown number. Save the Cartesia number
-  as a contact first.
+- **iPhone call screening** can silence a call from a number that is not in contacts and not identified
+  by a Call Directory extension. The app's extension identifies one number, the Twilio caller id, as
+  "Family Shield" once the child turns it on. The check code still works if they don't. The extension
+  does not label the child's number, and it does not say an incoming call is genuine.
 - **English voice notes.** Cartesia supports other languages, but the demo is tuned for English.
 - **State is in memory.** Restarting the Guardian forgets open cases.
 

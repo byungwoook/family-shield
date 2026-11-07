@@ -277,4 +277,11 @@
     <string name="error_otp_rate_limited">You\'ve reached the limit of 5 text codes in 24 hours. Try again later.</string>
     <string name="error_otp_unavailable">Text codes aren\'t available on this server right now.</string>
     <string name="error_otp_sms_failed">The text didn\'t go through. Please try again.</string>
+    <string name="outbound_label_title">Label Family Shield\'s call</string>
+    <string name="outbound_label_body">Optional. The check code works without this. This labels one number, the number Family Shield calls from, as Family Shield, so the phone does not treat that call as an unknown caller. It does not mark your number or any other number as genuine. On Android, only one app can hold call screening, so turning this on replaces another screening app.</string>
+    <string name="outbound_label_open_settings">Open the system setting</string>
+    <string name="outbound_label_unavailable">This phone doesn\'t offer call screening. The check code still works.</string>
+    <string name="outbound_label_on">Call labeling is on.</string>
+    <string name="outbound_label_off">Call labeling is off. The check code still works.</string>
+    <string name="caller_label_body">Family Shield is calling for your family.</string>
 </resources>
