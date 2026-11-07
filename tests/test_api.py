@@ -492,7 +492,24 @@ def test_boot_refuses_a_missing_secret(missing):
         boot(env)
 
 
+def _fake_prompts() -> str:
+    """Twelve one-byte stand-ins, so a production boot test can pass the prompt check."""
+    import tempfile
+    from pathlib import Path
+
+    from backend.calls import LANGUAGES, PROMPT_NAMES
+
+    root = Path(tempfile.mkdtemp(prefix="fs-prompts-"))
+    for language in LANGUAGES:
+        (root / language).mkdir()
+        for name in PROMPT_NAMES:
+            (root / language / f"{name}.mp3").write_bytes(b"\x00")
+    return str(root)
+
+
 PRODUCTION_SIGN_IN = {
+    "PUBLIC_BASE_URL": "https://api.example.com",
+    "PROMPTS_DIR": _fake_prompts(),
     "APPLE_BUNDLE_ID": "com.example.familyshield",
     "GOOGLE_SERVER_CLIENT_ID": "example.apps.googleusercontent.com",
     "TWILIO_ACCOUNT_SID": "AC" + "0" * 32,
@@ -516,7 +533,9 @@ def test_boot_leaves_dev_routes_out_of_production():
     assert "/v1/families" in paths
     assert "/v1/cases" in paths
     assert "/v1/dev/login" not in paths
-    assert not any("twilio" in path for path in paths)
+    assert "/v1/dev/cases/{case_id}/digits" not in paths
+    # Milestone 6: the signed Twilio webhooks are the production keypad path.
+    assert "/voice/twilio/{kind}" in paths
     assert "/tools/verify_code" not in paths
 
 

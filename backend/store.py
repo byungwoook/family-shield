@@ -363,8 +363,19 @@ def load_case(conn, case_id: UUID, *, now: datetime) -> dict:
     return _view(conn, row, now)
 
 
-def apply_case(conn, case_id: UUID, event: str, *, now: datetime, rng=None) -> dict:
-    """Apply one state-machine event and persist it in this transaction."""
+def apply_case(
+    conn,
+    case_id: UUID,
+    event: str,
+    *,
+    now: datetime,
+    rng=None,
+    step: str | None = None,
+) -> dict:
+    """Apply one state-machine event and persist it in this transaction.
+
+    The timeline row is `step` when given, else the event name.
+    """
     _require_aware(now, "now")
     if not isinstance(event, str):
         raise TypeError("event must be a str")
@@ -380,7 +391,7 @@ def apply_case(conn, case_id: UUID, event: str, *, now: datetime, rng=None) -> d
         row,
         updated,
         now=now,
-        step=event,
+        step=step or event,
         rng=rng,
         used_at=row["one_time_code_used_at"],
     )
@@ -642,17 +653,79 @@ def lock_case(conn, case_id: UUID, *, now: datetime) -> dict:
     return _view(conn, row, now)
 
 
-def record_call_attempt(conn, case_id: UUID, *, now: datetime) -> None:
-    """One accepted call attempt. `provider_ref` stays null until a real sid exists."""
+def record_call_attempt(conn, case_id: UUID, *, now: datetime) -> UUID:
+    """One call attempt, written as `sending` before anything is dialed.
+
+    `finish_call_attempt` moves it to `sent` with the CallSid once the
+    provider accepts, or to `failed` when it does not.
+    """
     _require_aware(now, "now")
-    _execute(
+    row = _one(
         conn,
         """
         INSERT INTO verification_attempts (
             case_id, channel, status, provider, started_at
-        ) VALUES (%s, 'call', 'sent', 'twilio', %s)
+        ) VALUES (%s, 'call', 'sending', 'twilio', %s)
+        RETURNING id
         """,
         (case_id, now),
+    )
+    return row["id"]
+
+
+def finish_call_attempt(
+    conn,
+    attempt_id: UUID,
+    *,
+    status: str,
+    now: datetime,
+    provider_ref: str | None = None,
+) -> None:
+    """`sent` with the provider's CallSid, or `failed` with an end time."""
+    _require_aware(now, "now")
+    if status not in ("sent", "failed"):
+        raise ValueError("attempt status must be sent or failed")
+    _execute(
+        conn,
+        """
+        UPDATE verification_attempts
+        SET status = %s,
+            provider_ref = COALESCE(%s, provider_ref),
+            ended_at = CASE WHEN %s = 'failed' THEN %s ELSE ended_at END
+        WHERE id = %s
+        """,
+        (status, provider_ref, status, now, attempt_id),
+    )
+
+
+def call_attempt(conn, case_id: UUID, call_sid: str) -> dict | None:
+    """The call attempt on this case with this CallSid, locked. None when it is not ours."""
+    if not isinstance(call_sid, str) or call_sid == "":
+        return None
+    return _one(
+        conn,
+        """
+        SELECT id, status, ended_at
+        FROM verification_attempts
+        WHERE case_id = %s AND channel = 'call' AND provider_ref = %s
+        FOR UPDATE
+        """,
+        (case_id, call_sid),
+    )
+
+
+def end_call_attempt(conn, attempt_id: UUID, *, failed: bool, now: datetime) -> None:
+    """Record the end of the call. The first end time wins."""
+    _require_aware(now, "now")
+    _execute(
+        conn,
+        """
+        UPDATE verification_attempts
+        SET status = CASE WHEN %s THEN 'failed' ELSE status END,
+            ended_at = COALESCE(ended_at, %s)
+        WHERE id = %s
+        """,
+        (failed, now, attempt_id),
     )
 
 
