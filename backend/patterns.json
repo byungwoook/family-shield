@@ -1,0 +1,45 @@
+{
+  "_note": "Hand-written catalog (docs/PRODUCT_REDESIGN.md, 'Pattern id, from a catalog'). Ids match the cases.pattern_id check constraint. A label is information for the parent; it never decides a result.",
+  "patterns": [
+    {
+      "id": "fake_arrest_bail",
+      "describes": "Arrest, jail, or bail, pay tonight",
+      "label": {"en": "a fake arrest and bail demand", "ko": "체포·보석금을 핑계로 한 송금 요구"}
+    },
+    {
+      "id": "accident",
+      "describes": "Crash or injury, pay now",
+      "label": {"en": "an accident or injury emergency", "ko": "사고·부상을 핑계로 한 급한 송금 요구"}
+    },
+    {
+      "id": "gift_card",
+      "describes": "Gift cards as the way to pay",
+      "label": {"en": "payment in gift cards", "ko": "기프트카드로 보내라는 요구"}
+    },
+    {
+      "id": "crypto_or_wire",
+      "describes": "Crypto, wire, or another hard-to-reverse payment",
+      "label": {"en": "crypto or wire transfer", "ko": "암호화폐·전신송금 요구"}
+    },
+    {
+      "id": "secrecy",
+      "describes": "Don't tell the other parent, don't call",
+      "label": {"en": "a request to keep it secret", "ko": "다른 가족에게 알리지 말라는 요구"}
+    },
+    {
+      "id": "tuition_or_school",
+      "describes": "Tuition, fees, or a school office",
+      "label": {"en": "a tuition or school fee", "ko": "등록금·학교 비용 요구"}
+    },
+    {
+      "id": "new_number",
+      "describes": "This is my new number, don't use the old one",
+      "label": {"en": "a 'new phone number' story", "ko": "번호가 바뀌었다는 이야기"}
+    },
+    {
+      "id": "none",
+      "describes": "Nothing in the list fits",
+      "label": {"en": "", "ko": ""}
+    }
+  ]
+}

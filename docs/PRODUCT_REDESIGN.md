@@ -496,7 +496,7 @@ Catalog (hand-written, shipped as `backend/patterns.json`, labels in en and ko):
 | The voice on the phone (`cartesia_setup.py` selects the fastest Claude model in Cartesia's catalog) | Not in the product. The fallback call plays fixed mp3 files and reads keypad digits. Claude is not in that path. |
 | Anything whose output is green or red | No such prompt. Do not add one. |
 
-Prompts are constants in the repo, reviewed in the PR that changes them. Temperature and tool use are unnecessary for these two JSON calls; keep the current `messages.create` shape (`max_tokens` around 400, one user message).
+Prompts are constants in the repo, reviewed in the PR that changes them. Temperature and tool use are unnecessary for these two JSON calls. Milestone 7 uses structured outputs (`output_config.format` with a JSON schema; the pattern id is an enum of the catalog), effort `low`, one user message, and `max_tokens` 4096: the current models think before answering, so 400 could cut the JSON off. A refusal or a truncated answer is treated as no answer. Server-side refusal fallbacks (`fallbacks: "default"`) are on. Digit runs of seven or more are replaced with `[number]` before any text is sent.
 
 ## Speech and phone calls
 
