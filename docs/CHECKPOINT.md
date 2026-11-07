@@ -20,7 +20,7 @@
 | #16 | `cursor/m9-ios-parent-4516` | M9 iOS 부모 화면 | main에 병합. 시뮬레이터 수동 확인과 APNs 기기 토큰은 남음 |
 | #17 | `cursor/m10-ios-share-4516` | M10 iOS 공유 확장 | main에 병합. 시뮬레이터 파일 공유와 카카오톡은 남음 |
 | #18 | `cursor/m11-ios-child-4516` | M11 iOS 자녀 화면 | main에 병합. Face ID와 APNs 기기 토큰은 남음 |
-| — | `cursor/m17-label-outbound-number-1a55` | M17 발신 번호 표시 | main 기준. 기기에서 확장·역할을 켜는 확인은 남음 |
+| #19 | `cursor/m17-label-outbound-number-1a55` | M17 발신 번호 표시 | main 기준. 기기에서 확장·역할을 켜는 확인은 남음 |
 | — | `wip/m12-android-partial` | 컴파일된 적 없는 초안. **병합 금지, 참고만** | 보관 |
 
 `claude/m12-android-parent`에 들어간 것:
@@ -50,7 +50,7 @@
 | M9 iOS 부모 화면 | main (PR #16). 시뮬레이터 UI 테스트와 Apple 로그인 기기 확인은 남음 |
 | M10 iOS 공유 확장 | main (PR #17). 시뮬레이터 파일 앱 공유와 카카오톡은 남음 |
 | M11 iOS 자녀 화면 | main (PR #18). `swift test`는 그때 33. 기기 Face ID와 APNs 키는 남음 |
-| M17 발신 번호 표시(iOS/Android) | **이 브랜치.** 번호 하나만 "Family Shield". 자리표시자 `+15555550100`. 백엔드 경로 없음. `swift test` 39. Android 86 passed, 1 skipped. 기기 확인은 남음 |
+| M17 발신 번호 표시(iOS/Android) | **이 브랜치, PR #19.** 번호 하나만 "Family Shield". 자리표시자 `+15555550100`. 백엔드 경로 없음. `swift test` 39. Android 86 passed, 1 skipped. 기기 확인은 남음 |
 | M18 해커톤 에이전트 코드 제거 | 마지막에. 앱 자녀 화면이 쓸 만해진 뒤 |
 | M19 Safe Wallet | v1 이후, 법률 검토 후 |
 
