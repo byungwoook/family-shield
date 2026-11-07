@@ -25,15 +25,21 @@ sealed interface RootState {
     data object SignedOut : RootState
     data object NeedsFamily : RootState
     data class Parent(val familyId: String, val familyName: String) : RootState
-    data class Child(val familyName: String) : RootState
+    data class Child(
+        val memberId: String,
+        val familyId: String,
+        val familyName: String,
+        val status: String,
+        val displayName: String,
+    ) : RootState
     data object MembershipPending : RootState
     data class Failed(val message: UiText) : RootState
 }
 
 /**
  * Session to screen. Signed in: `GET /v1/me` decides between creating a
- * family, the parent screens, and the child placeholder (the child path is
- * milestone 14). A sign-out anywhere, including a 401, lands on sign-in.
+ * family, the parent screens, or the child path. A sign-out anywhere,
+ * including a 401, lands on sign-in.
  */
 class RootViewModel(
     private val session: SessionManager,
@@ -88,7 +94,15 @@ class RootViewModel(
             me.memberships.firstOrNull { it.role == "parent" && it.status == "active" }
                 ?.let { return RootState.Parent(it.familyId, it.familyName) }
             me.memberships.firstOrNull { it.role == "child" }
-                ?.let { return RootState.Child(it.familyName) }
+                ?.let {
+                    return RootState.Child(
+                        memberId = it.memberId,
+                        familyId = it.familyId,
+                        familyName = it.familyName,
+                        status = it.status,
+                        displayName = it.displayName,
+                    )
+                }
             return RootState.MembershipPending
         }
     }

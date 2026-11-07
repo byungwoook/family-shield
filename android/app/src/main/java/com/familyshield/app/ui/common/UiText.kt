@@ -61,6 +61,16 @@ object ErrorMessages {
         ErrorCodes.UNSUPPORTED_AUDIO -> R.string.error_unsupported_audio
         ErrorCodes.EMPTY_AUDIO -> R.string.error_empty_audio
         ErrorCodes.LENGTH_REQUIRED -> R.string.error_length_required
+        ErrorCodes.INVITE_INVALID -> R.string.error_invite_invalid
+        ErrorCodes.INVITE_EXPIRED -> R.string.error_invite_expired
+        ErrorCodes.NOT_A_CHILD -> R.string.error_not_a_child
+        ErrorCodes.BIOMETRIC_REQUIRED -> R.string.error_biometric_required
+        ErrorCodes.PHONE_ALREADY_SET -> R.string.error_phone_already_set
+        ErrorCodes.SAME_NUMBER -> R.string.error_same_number
+        ErrorCodes.OTP_WRONG -> R.string.error_otp_wrong
+        ErrorCodes.OTP_EXPIRED -> R.string.error_otp_expired
+        ErrorCodes.INVALID_CODE -> R.string.error_invalid_code
+        ErrorCodes.NOT_THE_CHILD -> R.string.error_not_the_child
         else -> if (status >= 500) R.string.error_server else R.string.error_generic
     }
 }

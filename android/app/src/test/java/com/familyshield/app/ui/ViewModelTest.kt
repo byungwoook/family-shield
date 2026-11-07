@@ -147,11 +147,12 @@ class ViewModelTest {
         )
         assertTrue(parent is RootState.Parent)
         assertEquals("fam", (parent as RootState.Parent).familyId)
-        assertTrue(
-            RootViewModel.route(
-                Me("u", "Mina", "en", listOf(Membership("m", "fam", "Lee", "child", "active", "Mina"))),
-            ) is RootState.Child,
+        val child = RootViewModel.route(
+            Me("u", "Mina", "en", listOf(Membership("m", "fam", "Lee", "child", "invited", "Mina"))),
         )
+        assertTrue(child is RootState.Child)
+        assertEquals("m", (child as RootState.Child).memberId)
+        assertEquals("invited", child.status)
     }
 
     @Test
@@ -176,6 +177,9 @@ class ViewModelTest {
         assertEquals(R.string.error_audio_too_large, ErrorMessages.forCode(413, "audio_too_large"))
         assertEquals(R.string.error_unsupported_audio, ErrorMessages.forCode(415, "unsupported_audio"))
         assertEquals(R.string.error_empty_audio, ErrorMessages.forCode(400, "empty_audio"))
+        assertEquals(R.string.error_invite_invalid, ErrorMessages.forCode(400, "invite_invalid"))
+        assertEquals(R.string.error_biometric_required, ErrorMessages.forCode(403, "biometric_required"))
+        assertEquals(R.string.error_otp_wrong, ErrorMessages.forCode(400, "otp_wrong"))
     }
 }
 

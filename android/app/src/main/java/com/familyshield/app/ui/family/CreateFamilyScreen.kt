@@ -79,6 +79,7 @@ class CreateFamilyViewModel(private val families: FamilyRepository) : ViewModel(
 fun CreateFamilyRoute(
     viewModel: CreateFamilyViewModel,
     onCreated: (FamilyCreated) -> Unit,
+    onHaveInvite: () -> Unit,
     onSignOut: () -> Unit,
     banner: String? = null,
 ) {
@@ -87,6 +88,7 @@ fun CreateFamilyRoute(
         state = state,
         onNameChange = viewModel::setName,
         onCreate = { viewModel.create(onCreated) },
+        onHaveInvite = onHaveInvite,
         onSignOut = onSignOut,
         banner = banner,
     )
@@ -98,6 +100,7 @@ fun CreateFamilyContent(
     state: CreateFamilyUiState,
     onNameChange: (String) -> Unit,
     onCreate: () -> Unit,
+    onHaveInvite: () -> Unit,
     onSignOut: () -> Unit,
     banner: String? = null,
 ) {
@@ -134,6 +137,10 @@ fun CreateFamilyContent(
                 enabled = !state.busy,
                 modifier = Modifier.fillMaxWidth().testTag("create_family"),
             ) { Text(stringResource(R.string.create_family_button)) }
+            TextButton(onClick = onHaveInvite, modifier = Modifier.testTag("have_invite")) {
+                Text(stringResource(R.string.have_invite))
+            }
+            Text(stringResource(R.string.have_invite_hint), style = MaterialTheme.typography.bodyMedium)
             state.error?.let { ErrorText(it) }
         }
     }

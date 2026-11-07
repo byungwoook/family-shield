@@ -208,6 +208,34 @@ class ApiClientTest {
     }
 
     @Test
+    fun childRoutesSendTheContractFieldsAndNoExtra() = runTest {
+        val joined = client.acceptInvite("gp9b-8gku dcvn")
+        assertEquals("m-child", joined.memberId)
+        client.startOtp(OtpStartRequest("+821012345678", channel = "sms", biometricOk = false))
+        client.checkOtp(OtpCheckRequest("+821012345678", "123456"))
+        client.setCheckCode(CheckCodeRequest("2580", biometricOk = false))
+        client.setCheckCode(CheckCodeRequest("1357", biometricOk = true))
+        val open = client.childCase("case-child")
+        assertEquals("waiting_push", open.state)
+        assertEquals("money_request", open.kind)
+        val answered = client.answerCase("case-child", "no")
+        assertEquals("scam", answered.state)
+        val code = client.callCode("case-child")
+        assertEquals("654321", code.code)
+        val bodies = seen.map { it.path to it.body.snapshot().utf8() }
+        val accept = bodies.first { it.first == "/v1/invites/accept" }.second
+        assertEquals("""{"secret":"gp9b-8gku dcvn"}""", accept)
+        val firstCode = bodies.filter { it.first == "/v1/me/check-code" }
+        assertEquals("""{"code":"2580","biometric_ok":false}""", firstCode[0].second)
+        assertEquals("""{"code":"1357","biometric_ok":true}""", firstCode[1].second)
+        val answer = bodies.first { it.first == "/v1/cases/case-child/answer" }.second
+        assertEquals("""{"answer":"no"}""", answer)
+        val call = seen.first { it.path == "/v1/cases/case-child/call-code" }
+        assertEquals("GET", call.method)
+        assertEquals("", call.body.snapshot().utf8())
+    }
+
+    @Test
     fun blankBaseIsNotConfigured() = runTest {
         val unconfigured = ApiClient("", { "t" })
         val error = runCatching { unconfigured.me() }.exceptionOrNull()
@@ -244,10 +272,22 @@ class ApiClientTest {
             path == "/v1/families/fam-1/members/child-1/call-only" -> """{"status":"link_sent","phone_last4":"5678"}"""
             path == "/v1/families/fam-1/members/child-1/allow-link" -> """{"status":"link_sent","phone_last4":"5678"}"""
             path == "/v1/me/push-token" -> """{"status":"registered","provider":"fcm"}"""
+            path == "/v1/invites/accept" -> """{"member_id":"m-child","family_id":"fam-1","display_name":"Mina","status":"invited"}"""
+            path == "/v1/phones/otp" -> """{"status":"sent","channel":"sms","phone_last4":"5678","expires_at":"2026-11-07T00:10:00+00:00"}"""
+            path == "/v1/phones/otp/check" -> """{"status":"verified","phone_last4":"5678"}"""
+            path == "/v1/me/check-code" -> """{"status":"set"}"""
+            path == "/v1/cases/case-child" && request.method == "GET" -> """{"id":"case-child","child_member_id":"m-child","kind":"money_request","state":"waiting_push","result":null,"color":"open","created_at":"2026-11-07T00:00:00+00:00","updated_at":"2026-11-07T00:00:00+00:00","decided_at":null}"""
+            path == "/v1/cases/case-child/answer" -> """{"id":"case-child","child_member_id":"m-child","kind":"money_request","state":"scam","result":"not_sent","color":"red","answered_via":"push","created_at":"2026-11-07T00:00:00+00:00","updated_at":"2026-11-07T00:01:00+00:00","decided_at":"2026-11-07T00:01:00+00:00"}"""
+            path == "/v1/cases/case-child/call-code" -> """{"code":"654321"}"""
             path == "/v1/cases/case-1" -> """{"id":"case-1","family_id":"fam-1","child_member_id":"child-1","child_display_name":"Mina","state":"not_confirmed","result":"wrong","color":"yellow","parent_text":"send money","transcript":null,"claims":{"claimed_identity":"unknown","amount":"$50","story":"a story","red_flags":["gift card"]},"pattern_id":"gift_card","timeline":["start","static_code_mismatch"],"created_at":"2026-11-07T00:00:00+00:00","updated_at":"2026-11-07T00:01:00+00:00","decided_at":"2026-11-07T00:01:00+00:00","future_field":1}"""
             else -> return json(500, """{"error":"unavailable"}""")
         }
-        return json(if (path == "/v1/auth/nonce" || path == "/v1/dev/login" || path.endsWith("/children") || path.endsWith("/invite") || path == "/v1/families") 201 else if (path.endsWith("call-only") || path.endsWith("allow-link")) 202 else 200, ok)
+        val status = when {
+            path == "/v1/auth/nonce" || path == "/v1/dev/login" || path.endsWith("/children") || path.endsWith("/invite") || path == "/v1/families" -> 201
+            path.endsWith("call-only") || path.endsWith("allow-link") || path == "/v1/phones/otp" -> 202
+            else -> 200
+        }
+        return json(status, ok)
     }
 
     private fun json(code: Int, body: String) = MockResponse()
