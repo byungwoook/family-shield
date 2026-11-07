@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="signin_dev_heading">Developer sign-in (debug build only)</string>
+    <string name="signin_dev_name_label">Your name</string>
+    <string name="signin_dev_button">Sign in as developer</string>
+</resources>

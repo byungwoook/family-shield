@@ -52,6 +52,13 @@ attempt stored for that case. A webhook that fails either check changes
 nothing. Digits are never logged. `GET /v1/cases/{id}/call-code` shows
 the one-time code to the child's session only.
 
+Milestone 12 (the Android parent app): `GET /v1/me` lists the caller's
+memberships so an app can find its family after sign-in, and
+`GET /v1/families/{id}/cases` lists that family's recent cases as a
+summary. `POST /v1/auth/nonce` issues a single-use sign-in nonce; Apple
+and Google sign-in now require it (`backend.signin`), and spend it in the
+transaction that creates the session.
+
 `GET /v1/cases/{id}` is an allowlist. It has no code, no nonce, no hash,
 and no full phone number. `phone_last4` is the only phone fragment. The
 child's session gets a smaller allowlist (`child_case`): the state and the
@@ -73,7 +80,7 @@ from pathlib import Path
 from urllib.parse import parse_qsl
 from uuid import UUID, uuid4
 
-from fastapi import BackgroundTasks, FastAPI, Header, Request
+from fastapi import BackgroundTasks, FastAPI, Header, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
@@ -119,7 +126,17 @@ from backend.enroll import (
     otp_matches,
 )
 from backend.push import push_from_env
-from backend.signin import InvalidIdToken, apple_verifier, google_verifier
+from backend.signin import (
+    NONCE_LIMIT,
+    NONCE_TTL,
+    InvalidIdToken,
+    apple_verifier,
+    google_verifier,
+    hash_signin_nonce,
+    new_signin_nonce,
+    nonce_claim,
+    signin_nonce_ok,
+)
 from backend.store import (
     CaseNotFound,
     PhoneInUse,
@@ -146,6 +163,10 @@ from backend.store import (
     clear_push_token,
     complete_allow_link,
     confirm_phone_change,
+    consume_signin_nonce,
+    family_cases,
+    issue_signin_nonce,
+    user_memberships,
     family_push_targets,
     due_case_ids,
     expire_case,
@@ -182,6 +203,8 @@ SESSION_TTL = timedelta(days=30)
 AUDIO_LIMIT = 10 * 1024 * 1024
 AUDIO_SUFFIXES = frozenset({".mp3", ".m4a", ".mp4", ".aac", ".wav", ".ogg", ".opus", ".webm", ".amr"})
 TRANSCRIPT_LIMIT = 20000
+CASE_LIST_DEFAULT = 20
+CASE_LIST_MAX = 50
 # Seven or more digits, allowing spaces, dots, dashes, and parentheses
 # between them: a phone, card, or account number in the voice note.
 _LONG_NUMBER = re.compile(r"\+?\(?\d(?:[\s().-]*\d){6,}")
@@ -277,6 +300,7 @@ class DigitsIn(BaseModel):
 class SignInIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id_token: str = Field(max_length=8192)
+    nonce: str = Field(max_length=NONCE_LIMIT)
     locale: str
     display_name: str | None = Field(default=None, max_length=_NAME_LIMIT)
 
@@ -665,6 +689,7 @@ def create_app(
     timer_seconds: float | None = None,
     public_base_url: str | None = None,
     allow_secrets: Callable[[], str] = new_allow_secret,
+    signin_nonces: Callable[[], str] = new_signin_nonce,
 ) -> FastAPI:
     """Routes for one product process. Dependencies are injected.
 
@@ -680,6 +705,7 @@ def create_app(
     `timer_seconds`, a background loop runs `tick` that often; tests call
     `app.state.tick()` themselves.
     `public_base_url` is the https origin the allow-link SMS points at.
+    `signin_nonces() -> str` mints the raw nonce `POST /v1/auth/nonce` returns.
     """
     verifiers = dict(verifiers or {})
     @asynccontextmanager
@@ -1467,6 +1493,22 @@ def create_app(
     ):
         return _run(lambda conn: _answer(conn, authorization, case_id, body))
 
+    @app.post("/v1/auth/nonce")
+    def auth_nonce():
+        return _created(_run(_issue_nonce))
+
+    @app.get("/v1/me")
+    def get_me(authorization: str | None = Header(default=None)):
+        return _run(lambda conn: _me(conn, authorization))
+
+    @app.get("/v1/families/{family_id}/cases")
+    def get_family_cases(
+        family_id: str,
+        limit: int = Query(default=CASE_LIST_DEFAULT, ge=1, le=CASE_LIST_MAX),
+        authorization: str | None = Header(default=None),
+    ):
+        return _run(lambda conn: _family_cases(conn, authorization, family_id, limit))
+
     @app.post("/v1/auth/apple")
     def auth_apple(body: SignInIn):
         if verifiers.get("apple") is None:
@@ -1569,7 +1611,15 @@ def create_app(
         if body.locale not in ("en", "ko"):
             raise APIError(400, "invalid_body")
         now = _now()
-        identity = verifier.verify(body.id_token, now=now)
+        if not signin_nonce_ok(body.nonce):
+            raise InvalidIdToken("nonce")
+        identity = verifier.verify(
+            body.id_token, now=now, expected_nonce=nonce_claim(body.nonce)
+        )
+        # Spent before any user or session row: a failure here rolls back
+        # nothing but this UPDATE, and the response is the same 401.
+        if not consume_signin_nonce(conn, hash_signin_nonce(body.nonce), now=now):
+            raise InvalidIdToken("nonce")
         name = "" if body.display_name is None else body.display_name.strip()
         user_id = ensure_user(
             conn,
@@ -1581,6 +1631,57 @@ def create_app(
         )
         token = _new_session(conn, user_id, now)
         return {"token": token, "user_id": str(user_id)}
+
+    def _issue_nonce(conn) -> dict:
+        now = _now()
+        nonce = signin_nonces()
+        if not signin_nonce_ok(nonce) or len(nonce) < 32:
+            raise APIError(500, "config")
+        expires_at = now + NONCE_TTL
+        issue_signin_nonce(
+            conn, nonce_hash=hash_signin_nonce(nonce), expires_at=expires_at, now=now
+        )
+        return {"nonce": nonce, "expires_at": _iso(expires_at)}
+
+    def _me(conn, authorization) -> dict:
+        user = _user(conn, authorization)
+        memberships = [
+            {
+                "member_id": str(row["member_id"]),
+                "family_id": str(row["family_id"]),
+                "family_name": row["family_name"],
+                "role": row["role"],
+                "status": row["status"],
+                "display_name": row["display_name"],
+            }
+            for row in user_memberships(conn, user["user_id"])
+        ]
+        return {
+            "user_id": str(user["user_id"]),
+            "display_name": user["display_name"],
+            "locale": user["locale"],
+            "memberships": memberships,
+        }
+
+    def _family_cases(conn, authorization, family_id: str, limit: int) -> dict:
+        user = _user(conn, authorization)
+        family = _uuid(family_id)
+        if active_parent(conn, user["user_id"], family) is None:
+            raise APIError(404, "not_found")
+        cases = [
+            {
+                "id": str(row["id"]),
+                "child_member_id": str(row["child_member_id"]),
+                "child_display_name": row["child_display_name"],
+                "state": row["state"],
+                "result": row["result"],
+                "color": color_of(row["state"]),
+                "created_at": _iso(row["created_at"]),
+                "decided_at": _iso(row["decided_at"]),
+            }
+            for row in family_cases(conn, family, limit=limit)
+        ]
+        return {"family_id": str(family), "cases": cases}
 
     def _new_invite(conn, member_id, family_id, actor, now, step) -> dict:
         secret = invite_secrets()

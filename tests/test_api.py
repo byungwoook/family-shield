@@ -128,6 +128,7 @@ def _wipe(connection) -> None:
         "cases",
         "family_events",
         "phone_otp",
+        "signin_nonces",
         "family_members",
         "families",
         "sessions",

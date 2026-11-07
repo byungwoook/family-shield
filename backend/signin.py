@@ -1,7 +1,7 @@
 """Apple and Google ID tokens. Milestone 5.
 
-`IdTokenVerifier.verify(token, now=...)` returns the provider and the `sub`
-claim, or raises `InvalidIdToken`. Nothing else in the token is trusted:
+`IdTokenVerifier.verify(token, now=..., expected_nonce=...)` returns the
+provider and the `sub` claim, or raises `InvalidIdToken`. Nothing else in the token is trusted:
 email, name, and `email_verified` do not identify a family member, and the
 API never looks them up.
 
@@ -21,18 +21,28 @@ The checks, in order:
   the wall clock.
 - `sub` is a non-empty string of at most 255 characters.
 
-No nonce is checked in this milestone. A stolen ID token can be replayed
-until its `exp`. Apple tokens live about 10 minutes and Google tokens an
-hour. A nonce bound to the app's sign-in request is a follow-up.
+- `nonce` equals `expected_nonce` exactly (milestone 12). The app asks
+  `POST /v1/auth/nonce` for a raw nonce, hands `nonce_claim(raw)` (lowercase
+  SHA-256 hex) to Apple or Google as the request nonce, and posts the raw
+  value with the token. The server stores only `hash_signin_nonce(raw)` and
+  consumes it once, so a captured token cannot be replayed: its nonce is
+  already spent, and a fresh nonce does not match the token's claim. A
+  missing or different claim is `InvalidIdToken("nonce")`.
 
 `jwks_keys(url)` is the production key source. Tests pass a dict lookup.
 """
 
+import hashlib
+import hmac
+import re
+import secrets
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 import jwt
+
+from backend.codes import keyed_hash
 
 
 APPLE_ISSUERS = frozenset({"https://appleid.apple.com"})
@@ -43,6 +53,11 @@ LEEWAY = timedelta(seconds=60)
 _TOKEN_LIMIT = 8192
 _SUBJECT_LIMIT = 255
 _ALGORITHM = "RS256"
+# The raw sign-in nonce: 32 random bytes as url-safe base64 is 43 characters.
+NONCE_TTL = timedelta(minutes=10)
+NONCE_LIMIT = 128
+_NONCE = re.compile(r"[A-Za-z0-9_-]{32,128}")
+_NONCE_DOMAIN = "signin_nonce"
 
 
 class InvalidIdToken(Exception):
@@ -75,9 +90,11 @@ class IdTokenVerifier:
         self.issuers = frozenset(issuers)
         self._keys = keys
 
-    def verify(self, token: str, *, now: datetime) -> Identity:
+    def verify(self, token: str, *, now: datetime, expected_nonce: str) -> Identity:
         if now.tzinfo is None or now.tzinfo.utcoffset(now) is None:
             raise ValueError("now must be a timezone-aware datetime")
+        if not isinstance(expected_nonce, str) or expected_nonce == "":
+            raise ValueError("expected_nonce is required")
         if not isinstance(token, str) or token == "" or len(token) > _TOKEN_LIMIT:
             raise InvalidIdToken("malformed")
         try:
@@ -136,6 +153,11 @@ class IdTokenVerifier:
             or len(subject) > _SUBJECT_LIMIT
         ):
             raise InvalidIdToken("subject")
+        claimed = claims.get("nonce")
+        if not isinstance(claimed, str) or not hmac.compare_digest(
+            claimed.encode("utf-8"), expected_nonce.encode("utf-8")
+        ):
+            raise InvalidIdToken("nonce")
         return Identity(self.provider, subject)
 
 
@@ -155,6 +177,28 @@ def google_verifier(audience: str, keys: Callable[[str], object] | None = None) 
         issuers=GOOGLE_ISSUERS,
         keys=keys if keys is not None else jwks_keys(GOOGLE_JWKS_URL),
     )
+
+
+def new_signin_nonce() -> str:
+    """A raw sign-in nonce: 32 random bytes, url-safe base64, 43 characters."""
+    return secrets.token_urlsafe(32)
+
+
+def signin_nonce_ok(raw: object) -> bool:
+    """True when `raw` has the shape of a nonce this server could have issued."""
+    return isinstance(raw, str) and _NONCE.fullmatch(raw) is not None
+
+
+def nonce_claim(raw: str) -> str:
+    """What the app hands Apple or Google, and what the token's `nonce` must be."""
+    if not isinstance(raw, str):
+        raise TypeError("nonce must be a str")
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def hash_signin_nonce(raw: str) -> str:
+    """The stored form: `keyed_hash("signin_nonce", raw)`. Not the token claim."""
+    return keyed_hash(_NONCE_DOMAIN, raw)
 
 
 def jwks_keys(url: str) -> Callable[[str], object]:

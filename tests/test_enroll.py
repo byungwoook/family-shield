@@ -4,6 +4,11 @@ Readings, where the milestone text allows more than one:
 
 - Sign-in returns 200 with a session token. The same provider and subject
   is the same user. A bad token is 401 `invalid_token` and writes nothing.
+- Milestone 12: every sign-in carries a raw nonce from `POST /v1/auth/nonce`
+  (201) and a token whose `nonce` claim is `nonce_claim(raw)`. A body without
+  `nonce` is 400 `invalid_body`. A token with no claim or another nonce's
+  claim, and a nonce that is unknown, spent, or past its 10 minutes, are 401
+  `invalid_token`, and then no user, session, or spent nonce is written.
 - An invite secret is 12 characters from `INVITE_ALPHABET`, shown as
   `XXXX-XXXX-XXXX`, and is returned only by the add-child and re-issue
   responses. Case and dashes do not matter on accept. An expired secret is
@@ -49,7 +54,13 @@ from backend.enroll import (
     otp_message,
     otp_voice_twiml,
 )
-from backend.signin import apple_verifier, google_verifier
+from backend.signin import (
+    NONCE_TTL,
+    apple_verifier,
+    google_verifier,
+    hash_signin_nonce,
+    nonce_claim,
+)
 from test_api import (  # noqa: F401  (database_url and secrets are fixtures)
     NOW,
     PRODUCTION_SIGN_IN,
@@ -74,7 +85,8 @@ def lookup(kid):
     return {"k1": SIGNING_KEY.public_key()}[kid]
 
 
-def id_token(provider, sub, clock, aud=None):
+def id_token(provider, sub, clock, aud=None, nonce=None):
+    """`nonce` is the raw value; the claim is its SHA-256 hex. None leaves it out."""
     if provider == "apple":
         iss, default_aud = "https://appleid.apple.com", APPLE_AUD
     else:
@@ -87,6 +99,8 @@ def id_token(provider, sub, clock, aud=None):
         "iat": int(now.timestamp()),
         "exp": int((now + timedelta(minutes=10)).timestamp()),
     }
+    if nonce is not None:
+        claims["nonce"] = nonce_claim(nonce)
     return jwt.encode(claims, SIGNING_KEY, algorithm="RS256", headers={"kid": "k1"})
 
 
@@ -147,8 +161,23 @@ def env(database_url):
 # --- helpers ---
 
 
+def server_nonce(client):
+    response = client.post("/v1/auth/nonce")
+    assert response.status_code == 201, response.text
+    return response.json()["nonce"]
+
+
+def sign_in_body(client, clock, provider, sub, locale="en", aud=None):
+    nonce = server_nonce(client)
+    return {
+        "id_token": id_token(provider, sub, clock, aud=aud, nonce=nonce),
+        "nonce": nonce,
+        "locale": locale,
+    }
+
+
 def sign_in(client, clock, provider, sub, locale="en", name=None):
-    body = {"id_token": id_token(provider, sub, clock), "locale": locale}
+    body = sign_in_body(client, clock, provider, sub, locale)
     if name is not None:
         body["display_name"] = name
     response = client.post(f"/v1/auth/{provider}", json=body)
@@ -413,7 +442,8 @@ def test_a_blank_audience_in_dev_answers_sign_in_unavailable():
     client = TestClient(app)
     for provider in ("apple", "google"):
         response = client.post(
-            f"/v1/auth/{provider}", json={"id_token": "x.y.z", "locale": "en"}
+            f"/v1/auth/{provider}",
+            json={"id_token": "x.y.z", "nonce": "n" * 43, "locale": "en"},
         )
         assert response.status_code == 503
         assert response.json() == {"error": "sign_in_unavailable"}
@@ -438,32 +468,168 @@ def test_sign_in_is_an_upsert_on_provider_and_subject(env):
     assert me.status_code == 201
 
 
-def test_a_bad_id_token_is_401_and_writes_nothing(env):
-    client, clock, conn = env["client"], env["clock"], env["conn"]
-    wrong_aud = id_token("apple", "s", clock, aud="com.example.other")
-    google_for_apple = id_token("google", "s", clock)
-    for token in (wrong_aud, google_for_apple, "not-a-token"):
-        response = client.post("/v1/auth/apple", json={"id_token": token, "locale": "en"})
-        assert response.status_code == 401
-        assert response.json() == {"error": "invalid_token"}
-    clock.advance(timedelta(minutes=20))
-    stale = id_token("apple", "s", ManualClock(NOW))
-    response = client.post("/v1/auth/apple", json={"id_token": stale, "locale": "en"})
-    assert response.status_code == 401
+def assert_nothing_signed_in(conn):
     assert count(conn, "SELECT count(*) FROM users") == 0
     assert count(conn, "SELECT count(*) FROM sessions") == 0
+    assert count(conn, "SELECT count(*) FROM signin_nonces WHERE consumed_at IS NOT NULL") == 0
+
+
+def refused(response):
+    assert response.status_code == 401, response.text
+    assert response.json() == {"error": "invalid_token"}
+
+
+def test_a_bad_id_token_is_401_and_writes_nothing(env):
+    client, clock, conn = env["client"], env["clock"], env["conn"]
+    for build in (
+        lambda n: id_token("apple", "s", clock, aud="com.example.other", nonce=n),
+        lambda n: id_token("google", "s", clock, nonce=n),
+        lambda n: "not-a-token",
+    ):
+        nonce = server_nonce(client)
+        response = client.post(
+            "/v1/auth/apple", json={"id_token": build(nonce), "nonce": nonce, "locale": "en"}
+        )
+        refused(response)
+    clock.advance(timedelta(minutes=20))
+    nonce = server_nonce(client)
+    stale = id_token("apple", "s", ManualClock(NOW), nonce=nonce)
+    response = client.post("/v1/auth/apple", json={"id_token": stale, "nonce": nonce, "locale": "en"})
+    refused(response)
+    assert_nothing_signed_in(conn)
 
 
 def test_sign_in_refuses_an_unknown_locale_and_extra_fields(env):
     client, clock = env["client"], env["clock"]
-    token = id_token("apple", "s", clock)
-    bad_locale = client.post("/v1/auth/apple", json={"id_token": token, "locale": "fr"})
+    body = sign_in_body(client, clock, "apple", "s")
+    bad_locale = client.post("/v1/auth/apple", json={**body, "locale": "fr"})
     assert bad_locale.status_code == 400
-    extra = client.post(
-        "/v1/auth/apple", json={"id_token": token, "locale": "en", "email": "a@b.c"}
-    )
+    extra = client.post("/v1/auth/apple", json={**body, "email": "a@b.c"})
     assert extra.status_code == 400
     assert extra.json() == {"error": "invalid_body"}
+
+
+# --- Sign-in nonce (milestone 12) ---
+
+
+def test_the_nonce_route_is_public_and_returns_a_fresh_value(env):
+    client, clock = env["client"], env["clock"]
+    first = client.post("/v1/auth/nonce")
+    second = client.post("/v1/auth/nonce")
+    assert first.status_code == second.status_code == 201
+    assert set(first.json()) == {"nonce", "expires_at"}
+    assert first.json()["nonce"] != second.json()["nonce"]
+    assert len(first.json()["nonce"]) >= 32
+    assert first.json()["expires_at"] == (clock.now() + NONCE_TTL).isoformat()
+    assert NONCE_TTL == timedelta(minutes=10)
+
+
+def test_the_nonce_row_stores_no_plaintext(env):
+    client, conn = env["client"], env["conn"]
+    nonce = server_nonce(client)
+    conn.rollback()
+    rows = conn.execute("SELECT nonce_hash, expires_at, consumed_at FROM signin_nonces").fetchall()
+    assert len(rows) == 1
+    stored, _expires, consumed = rows[0]
+    assert stored == hash_signin_nonce(nonce)
+    assert stored != nonce and nonce not in stored
+    assert stored != nonce_claim(nonce)
+    assert consumed is None
+
+
+@pytest.mark.parametrize("provider", ["apple", "google"])
+def test_a_body_without_a_nonce_is_400(env, provider):
+    client, clock, conn = env["client"], env["clock"], env["conn"]
+    body = sign_in_body(client, clock, provider, "s")
+    del body["nonce"]
+    response = client.post(f"/v1/auth/{provider}", json=body)
+    assert response.status_code == 400
+    assert response.json() == {"error": "invalid_body"}
+    assert_nothing_signed_in(conn)
+
+
+@pytest.mark.parametrize("provider", ["apple", "google"])
+def test_a_token_without_a_nonce_claim_is_401(env, provider):
+    client, clock, conn = env["client"], env["clock"], env["conn"]
+    nonce = server_nonce(client)
+    token = id_token(provider, "s", clock)
+    refused(client.post(f"/v1/auth/{provider}", json={"id_token": token, "nonce": nonce, "locale": "en"}))
+    assert_nothing_signed_in(conn)
+
+
+def test_a_token_for_another_nonce_is_401(env):
+    client, clock, conn = env["client"], env["clock"], env["conn"]
+    issued_for_token = server_nonce(client)
+    posted = server_nonce(client)
+    token = id_token("google", "s", clock, nonce=issued_for_token)
+    refused(client.post("/v1/auth/google", json={"id_token": token, "nonce": posted, "locale": "en"}))
+    # The token claim alone, posted as the nonce, is not the raw value either.
+    refused(
+        client.post(
+            "/v1/auth/google",
+            json={"id_token": token, "nonce": nonce_claim(issued_for_token), "locale": "en"},
+        )
+    )
+    assert_nothing_signed_in(conn)
+
+
+def test_a_nonce_the_server_never_issued_is_401(env):
+    client, clock, conn = env["client"], env["clock"], env["conn"]
+    invented = "q" * 43
+    token = id_token("apple", "s", clock, nonce=invented)
+    refused(client.post("/v1/auth/apple", json={"id_token": token, "nonce": invented, "locale": "en"}))
+    assert_nothing_signed_in(conn)
+
+
+def test_a_reused_nonce_is_401_and_the_replay_writes_nothing(env):
+    client, clock, conn = env["client"], env["clock"], env["conn"]
+    body = sign_in_body(client, clock, "apple", "replayed")
+    first = client.post("/v1/auth/apple", json=body)
+    assert first.status_code == 200
+    assert count(conn, "SELECT count(*) FROM sessions") == 1
+    refused(client.post("/v1/auth/apple", json=body))
+    # The same token cannot be paired with a fresh nonce: its claim is the old one.
+    fresh = server_nonce(client)
+    refused(client.post("/v1/auth/apple", json={**body, "nonce": fresh}))
+    assert count(conn, "SELECT count(*) FROM sessions") == 1
+    assert count(conn, "SELECT count(*) FROM users") == 1
+    assert count(conn, "SELECT count(*) FROM signin_nonces WHERE consumed_at IS NOT NULL") == 1
+
+
+def test_a_nonce_used_on_one_provider_is_spent_for_the_other(env):
+    client, clock = env["client"], env["clock"]
+    nonce = server_nonce(client)
+    apple_token = id_token("apple", "s", clock, nonce=nonce)
+    google_token = id_token("google", "s", clock, nonce=nonce)
+    ok = client.post("/v1/auth/apple", json={"id_token": apple_token, "nonce": nonce, "locale": "en"})
+    assert ok.status_code == 200
+    refused(client.post("/v1/auth/google", json={"id_token": google_token, "nonce": nonce, "locale": "en"}))
+
+
+def test_an_expired_nonce_is_401(env):
+    client, clock, conn = env["client"], env["clock"], env["conn"]
+    nonce = server_nonce(client)
+    clock.advance(NONCE_TTL)
+    token = id_token("apple", "s", clock, nonce=nonce)
+    refused(client.post("/v1/auth/apple", json={"id_token": token, "nonce": nonce, "locale": "en"}))
+    assert_nothing_signed_in(conn)
+
+
+def test_a_nonce_just_inside_its_ttl_still_signs_in(env):
+    client, clock = env["client"], env["clock"]
+    nonce = server_nonce(client)
+    clock.advance(NONCE_TTL - timedelta(seconds=1))
+    token = id_token("apple", "s", clock, nonce=nonce)
+    response = client.post("/v1/auth/apple", json={"id_token": token, "nonce": nonce, "locale": "en"})
+    assert response.status_code == 200
+
+
+def test_issuing_a_nonce_drops_expired_rows(env):
+    client, clock, conn = env["client"], env["clock"], env["conn"]
+    server_nonce(client)
+    clock.advance(NONCE_TTL + timedelta(seconds=1))
+    server_nonce(client)
+    assert count(conn, "SELECT count(*) FROM signin_nonces") == 1
 
 
 # --- The enrollment loop ---

@@ -242,7 +242,7 @@ Indexes that matter: `cases (child_member_id, created_at)`, `cases (deadline_at)
 
 ### Sign in
 
-iOS sends an Apple identity token to `POST /v1/auth/apple`. Android sends a Google ID token to `POST /v1/auth/google`. Each handler checks the audience (bundle id, or the Android server client id) and upserts `users` on `(auth_provider, auth_subject)`. Both return the same random session token. Store the hash of the token. iOS keeps it in the Keychain. Android keeps it in EncryptedSharedPreferences or the Keystore-backed equivalent.
+iOS sends an Apple identity token to `POST /v1/auth/apple`. Android sends a Google ID token to `POST /v1/auth/google`. Each handler checks the audience (bundle id, or the Android server client id) and upserts `users` on `(auth_provider, auth_subject)`. Both return the same random session token. Store the hash of the token. Before either, the app gets a raw nonce from `POST /v1/auth/nonce`, passes its lowercase SHA-256 hex to Apple or Google as the request nonce, and posts the raw value with the token; the server checks the claim and spends the nonce in the transaction that creates the session, so a captured token cannot be replayed. iOS keeps it in the Keychain. Android keeps it in EncryptedSharedPreferences or the Keystore-backed equivalent.
 
 There is no password. A dev-only login (`DEV_AUTH=1`, and the process refuses to boot if `ENV=production` with that flag on) mints a session so API tests run without Apple or Google. Milestone 5 adds both sign-in routes. The dev login stays behind the flag for tests and is absent from the production boot path.
 
@@ -286,10 +286,13 @@ JSON, `/v1/...`. Errors are `{ "error": "some_stable_code" }`. Every family quer
 
 | Method | Path | Who | Purpose |
 | --- | --- | --- | --- |
-| POST | `/v1/auth/apple` | public | Apple identity token → session |
-| POST | `/v1/auth/google` | public | Google ID token → session |
+| POST | `/v1/auth/nonce` | public | 201 `{ nonce, expires_at }`: a single-use sign-in nonce, 10 minutes. Only its keyed hash is stored |
+| POST | `/v1/auth/apple` | public | Apple identity token + raw `nonce` → session. The token's `nonce` claim must be SHA-256 hex of it; unknown, used, or expired is 401 `invalid_token` |
+| POST | `/v1/auth/google` | public | Google ID token + raw `nonce` → session, checked the same way |
+| GET | `/v1/me` | any session | `user_id`, `display_name`, `locale`, and non-removed `memberships` (member, family id and name, role, status), oldest first. No phone, no hashes |
 | POST | `/v1/families` | parent session | Create a family |
 | POST | `/v1/families/{id}/children` | parent | Invite a child, returns the secret once |
+| GET | `/v1/families/{id}/cases?limit=N` | active parent of that family | Recent cases, newest first, default 20, 1..50: id, child, state, result, color, created and decided times. No text, transcript, claims, or codes |
 | GET | `/v1/families/{id}/members` | parent | Members for the parent screen: status, last4, `awaiting_confirm`. No hashes |
 | POST | `/v1/families/{id}/members/{memberId}/invite` | parent | Re-issue the secret while no child account has accepted it. The old secret stops working |
 | POST | `/v1/invites/accept` | child session | Body: invite secret |
