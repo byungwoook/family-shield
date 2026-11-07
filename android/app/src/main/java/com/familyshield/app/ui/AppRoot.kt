@@ -31,6 +31,10 @@ import com.familyshield.app.data.api.ParentCase
 import com.familyshield.app.domain.ApiLocale
 import com.familyshield.app.ui.caseflow.CaseRoute
 import com.familyshield.app.ui.caseflow.CaseViewModel
+import com.familyshield.app.ui.child.AcceptInviteContent
+import com.familyshield.app.ui.child.AcceptInviteViewModel
+import com.familyshield.app.ui.child.ChildRoute
+import com.familyshield.app.ui.child.ChildViewModel
 import com.familyshield.app.ui.common.FailureBox
 import com.familyshield.app.ui.common.LoadingBox
 import com.familyshield.app.ui.family.CreateFamilyRoute
@@ -81,17 +85,30 @@ fun AppRoot(container: AppContainer) {
             )
         }
         RootState.NeedsFamily -> {
-            val create = viewModel { CreateFamilyViewModel(container.families) }
+            var joining by rememberSaveable { mutableStateOf(false) }
             val waiting by container.shares.pending.collectAsStateWithLifecycle()
-            CreateFamilyRoute(
-                create,
-                onCreated = rootViewModel::familyCreated,
-                onSignOut = {
-                    container.shares.discardPending()
-                    rootViewModel.signOut()
-                },
-                banner = if (waiting != null) stringResource(R.string.share_waiting_family) else null,
-            )
+            if (joining) {
+                val invite = viewModel { AcceptInviteViewModel(container.child) }
+                val inviteState by invite.state.collectAsStateWithLifecycle()
+                AcceptInviteContent(
+                    state = inviteState,
+                    onSecret = invite::setSecret,
+                    onAccept = { invite.accept { rootViewModel.retry() } },
+                    onBack = { joining = false },
+                )
+            } else {
+                val create = viewModel { CreateFamilyViewModel(container.families) }
+                CreateFamilyRoute(
+                    create,
+                    onCreated = rootViewModel::familyCreated,
+                    onHaveInvite = { joining = true },
+                    onSignOut = {
+                        container.shares.discardPending()
+                        rootViewModel.signOut()
+                    },
+                    banner = if (waiting != null) stringResource(R.string.share_waiting_family) else null,
+                )
+            }
         }
         is RootState.Parent -> {
             val family = viewModel(key = "family-${current.familyId}") {
@@ -127,16 +144,30 @@ fun AppRoot(container: AppContainer) {
             )
         }
         is RootState.Child -> {
+            val childModel = viewModel(key = "child-${current.memberId}-${current.status}") {
+                ChildViewModel(
+                    memberId = current.memberId,
+                    familyName = current.familyName,
+                    status = current.status,
+                    child = container.child,
+                    progress = container.childProgress,
+                )
+            }
+            val generation by container.alerts.generation.collectAsStateWithLifecycle()
+            LaunchedEffect(childModel, generation) {
+                container.alerts.currentCaseId()?.let { childModel.openAlert(it) }
+            }
             val pending by container.shares.pending.collectAsStateWithLifecycle()
-            Placeholder(
-                title = stringResource(R.string.child_placeholder_title),
-                body = stringResource(R.string.child_placeholder_body, current.familyName),
+            ChildRoute(
+                viewModel = childModel,
+                biometric = container.biometric,
                 onSignOut = {
                     container.shares.discardPending()
                     rootViewModel.signOut()
                 },
-                notice = if (pending != null) stringResource(R.string.share_needs_parent) else null,
-                onDiscardNotice = if (pending != null) container.shares::discardPending else null,
+                onRefreshMembership = rootViewModel::retry,
+                shareNotice = if (pending != null) stringResource(R.string.share_needs_parent) else null,
+                onDiscardShare = if (pending != null) container.shares::discardPending else null,
             )
         }
         RootState.MembershipPending -> {

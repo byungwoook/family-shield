@@ -86,3 +86,13 @@ With `PUBLIC_BASE_URL` set, add a child by number (`POST .../call-only`) for a
 - [ ] Allow → SMS code → check code twice → done page; the code is never shown again
 - [ ] A case goes straight to the call and asks for that 4-digit code
 - [ ] A second link resets the code; the old code no longer works on the call
+
+## 8. Android child path (milestone 14), needs an emulator or a device
+
+Not run here: this environment has no KVM, so BiometricPrompt cannot be approved on an emulator. Firebase is also still absent, so there is no device FCM token. The JVM tests cover "Not now" leaving the case open, the code staying off disk and off the notification, and the reset requiring a biometric success before it is sent.
+
+- [ ] Accept the invite, enter a `+1` or `+82` number, enter the SMS code, and set the 4-digit check code twice
+- [ ] A push opens the question. The notification has no Yes/No action and no code
+- [ ] BiometricPrompt, then Yes or No. Not now does not answer, and after 90 seconds the phone rings
+- [ ] While that call is in progress, BiometricPrompt reveals the 6-digit code. It is not on the lock screen
+- [ ] Resetting the check code asks for biometrics again, and the old code no longer works on a call

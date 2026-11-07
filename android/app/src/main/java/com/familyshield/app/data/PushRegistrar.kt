@@ -9,10 +9,12 @@ fun interface PushTokenSource {
 }
 
 /**
- * Registers the parent's FCM token (`POST /v1/me/push-token`) so number-change
- * notices can reach this device. `env` stays null: the contract requires that
+ * Registers this device's FCM token (`POST /v1/me/push-token`). A parent's
+ * token receives number-change notices. A child's token is what makes a case
+ * ask in the app before calling. `env` stays null: the contract requires that
  * for `provider = fcm`. A missing token (no `google-services.json` in this
- * build) is a no-op, not an error.
+ * build) is a no-op, not an error. The notification itself is built by
+ * [com.familyshield.app.ui.child.ChildAlerts] and has no Yes/No action and no code.
  */
 class PushRegistrar(
     private val api: PushApi,

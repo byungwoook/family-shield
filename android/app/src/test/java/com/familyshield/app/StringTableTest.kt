@@ -33,6 +33,18 @@ class StringTableTest {
         val korean = strings(File("src/main/res/values-ko/strings.xml"))
         assertTrue(korean.getValue("result_not_sent").contains("돈을 보내지"))
         assertTrue(korean.getValue("case_dont_send").contains("돈을 보내지"))
+        assertEquals(
+            "Family Shield needs you to confirm a request.",
+            english.getValue("child_notification_body"),
+        )
+        assertEquals(
+            "패밀리 쉴드에서 확인이 필요한 요청이 있어요.",
+            korean.getValue("child_notification_body"),
+        )
+        assertEquals(
+            "Did you send your family a message asking for money?",
+            english.getValue("child_question"),
+        )
     }
 
     private fun unescape(raw: String) = raw

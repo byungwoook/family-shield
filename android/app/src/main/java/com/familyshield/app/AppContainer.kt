@@ -1,17 +1,22 @@
 package com.familyshield.app
 
 import android.content.Context
+import com.familyshield.app.data.AlertInbox
 import com.familyshield.app.data.ApiPushApi
 import com.familyshield.app.data.AuthRepository
 import com.familyshield.app.data.CaseRepository
+import com.familyshield.app.data.ChildRepository
 import com.familyshield.app.data.FamilyRepository
 import com.familyshield.app.data.NoFirebaseToken
+import com.familyshield.app.data.PrefsChildProgress
 import com.familyshield.app.data.PushRegistrar
 import com.familyshield.app.data.api.ApiClient
 import com.familyshield.app.data.session.EncryptedTokenStore
 import com.familyshield.app.data.session.KeystoreKeys
 import com.familyshield.app.data.session.SessionManager
 import com.familyshield.app.share.ShareInbox
+import com.familyshield.app.ui.child.AndroidBiometricGate
+import com.familyshield.app.ui.child.BiometricGate
 import com.familyshield.app.ui.signin.GoogleSignInClient
 
 /**
@@ -43,7 +48,13 @@ class AppContainer(context: Context) {
     val auth: AuthRepository by lazy { AuthRepository(api, session) }
     val families: FamilyRepository by lazy { FamilyRepository(api) }
     val cases: CaseRepository by lazy { CaseRepository(api) }
+    val child: ChildRepository by lazy { ChildRepository(api) }
+    val childProgress: PrefsChildProgress by lazy {
+        PrefsChildProgress(appContext.getSharedPreferences(PrefsChildProgress.PREFS, Context.MODE_PRIVATE))
+    }
     val shares: ShareInbox by lazy { ShareInbox(appContext) }
+    val alerts: AlertInbox by lazy { AlertInbox() }
+    val biometric: BiometricGate by lazy { AndroidBiometricGate() }
     val push: PushRegistrar by lazy { PushRegistrar(ApiPushApi(api), NoFirebaseToken) }
     val google: GoogleSignInClient by lazy { GoogleSignInClient(BuildConfig.GOOGLE_SERVER_CLIENT_ID) }
 
