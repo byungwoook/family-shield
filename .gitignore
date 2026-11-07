@@ -28,3 +28,10 @@ tunnel.log
 samples/*.mp3
 samples/*.m4a
 samples/*.wav
+
+# Swift / Xcode
+.build/
+ios/FamilyShield.xcodeproj/
+DerivedData/
+xcuserdata/
+*.xcuserstate
