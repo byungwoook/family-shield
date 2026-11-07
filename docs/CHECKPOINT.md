@@ -16,7 +16,7 @@
 | #5~#12 | (각 기능 브랜치) | M4~M8, M15, M16 | main에 병합 |
 | #13 | `claude/m12-android-parent` | M12 Android 부모 앱 | main에 병합. 에뮬레이터·FCM 기기 토큰은 여전히 수동 |
 | #14 | `cursor/m13-android-share-4d8a` | M13 Android 공유 인텐트 | main에 병합. 에뮬레이터 파일 공유와 카카오톡 수동 확인은 남음 |
-| (이 브랜치) | `cursor/m14-android-child-308a` | M14 Android 자녀 화면 | main 기준. 에뮬레이터 생체 인증과 FCM 기기 토큰은 남음 |
+| #15 | `cursor/m14-android-child-308a` | M14 Android 자녀 화면 | main 기준. 에뮬레이터 생체 인증과 FCM 기기 토큰은 남음 |
 | — | `wip/m12-android-partial` | 컴파일된 적 없는 초안. **병합 금지, 참고만** | 보관 |
 
 `claude/m12-android-parent`에 들어간 것:
@@ -42,7 +42,7 @@
 | M1–M8, M15, M16 (백엔드) | 완료, PR #2–#12 |
 | M12 Android 부모 화면 | main (PR #13). JVM 테스트와 DEV_AUTH 스모크 통과. 에뮬레이터 수동 확인과 FCM 기기 토큰은 남음 |
 | M13 Android 공유 인텐트 | main (PR #14). `audio/*`·`text/plain`·`application/ogg` 공유가 초안이 되고, 확인을 눌러야 multipart로 올라간다. 10MB(10 485 760바이트)는 폰에서 거절. 에뮬레이터에서 파일 앱으로 공유하는 확인과 카카오톡 수동 확인은 남음 |
-| M14 Android 자녀 화면 | **이 브랜치.** 초대·번호·OTP·확인 번호·생체 인증 답변·통화 코드·재설정. JVM 77 passed, 1 skipped. 에뮬레이터 생체 인증과 FCM 기기 토큰은 남음. 백엔드 경로는 추가하지 않음 |
+| M14 Android 자녀 화면 | **PR #15.** 초대·번호·OTP·확인 번호·생체 인증 답변·통화 코드·재설정. JVM 77 passed, 1 skipped. 에뮬레이터 생체 인증과 FCM 기기 토큰은 남음. 백엔드 경로는 추가하지 않음 |
 | M9–M11 iOS | 시작 전. M13은 iOS 공유(M10)를 포함하지 않는다. 이 Linux 환경엔 Swift/Xcode가 없어 iOS는 빌드하지 않았다(Mac 필요) |
 | M17 발신 번호 표시(iOS/Android) | 시작 전 |
 | M18 해커톤 에이전트 코드 제거 | 마지막에. 앱 자녀 화면이 쓸 만해진 뒤 |
