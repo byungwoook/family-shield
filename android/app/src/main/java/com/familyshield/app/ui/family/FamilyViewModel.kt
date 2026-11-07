@@ -8,10 +8,14 @@ import com.familyshield.app.data.CaseGateway
 import com.familyshield.app.data.FamilySource
 import com.familyshield.app.data.api.ApiClient
 import com.familyshield.app.data.api.ApiException
+import com.familyshield.app.data.api.CaseAudio
 import com.familyshield.app.data.api.CaseSummary
 import com.familyshield.app.data.api.Member
 import com.familyshield.app.data.api.ParentCase
+import com.familyshield.app.domain.MemberRules
 import com.familyshield.app.domain.PhoneInput
+import com.familyshield.app.domain.ShareProblem
+import com.familyshield.app.domain.VoiceNotes
 import com.familyshield.app.ui.common.ErrorMessages
 import com.familyshield.app.ui.common.UiText
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -19,6 +23,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.io.File
 
 enum class FamilyPage { Home, NewCase }
 
@@ -26,6 +31,13 @@ data class ShownInvite(
     val name: String,
     val secret: String,
     val expiresAt: String,
+)
+
+/** A voice note copied into app storage. It is not uploaded until Verify. */
+data class DraftAudio(
+    val file: File,
+    val displayName: String,
+    val contentType: String,
 )
 
 data class FamilyUiState(
@@ -44,6 +56,8 @@ data class FamilyUiState(
     val callOnlyMemberId: String? = null,
     val caseChildId: String? = null,
     val caseText: String = "",
+    val draftAudio: DraftAudio? = null,
+    val fromShare: Boolean = false,
 )
 
 /**
@@ -55,7 +69,11 @@ class FamilyViewModel(
     private val families: FamilySource,
     private val cases: CaseGateway,
     private val savedState: SavedStateHandle = SavedStateHandle(),
+    private val deleteDraft: (File) -> Unit = { it.delete() },
 ) : ViewModel() {
+
+    private var appliedShare: String? = null
+    private var boundToken: String? = null
 
     private val _state = MutableStateFlow(
         FamilyUiState(
@@ -66,12 +84,72 @@ class FamilyViewModel(
                     expiresAt = savedState.get<String>(KEY_EXPIRES).orEmpty(),
                 )
             },
+            page = savedState.get<String>(KEY_PAGE)?.let { runCatching { FamilyPage.valueOf(it) }.getOrNull() }
+                ?: FamilyPage.Home,
+            caseText = savedState.get<String>(KEY_CASE_TEXT).orEmpty(),
+            caseChildId = savedState.get<String>(KEY_CASE_CHILD),
+            fromShare = savedState.get<Boolean>(KEY_FROM_SHARE) == true,
+            draftAudio = restoredAudio(savedState),
         ),
     )
     val state: StateFlow<FamilyUiState> = _state.asStateFlow()
 
     init {
+        viewModelScope.launch { _state.collect { persistCase(it) } }
         refresh()
+    }
+
+    /**
+     * A new session token means a different sign-in. Drop a draft left by the
+     * previous one. The first bind keeps a draft restored after process death.
+     */
+    fun bindSession(token: String?) {
+        if (token == null) return
+        val previous = boundToken
+        if (previous == null) {
+            boundToken = token
+            return
+        }
+        if (previous != token) {
+            boundToken = token
+            discardDraft()
+        }
+    }
+
+    /**
+     * Opens the new-case screen with the shared text and voice note. Does not
+     * call the server. The same [token] twice does not wipe edits.
+     */
+    fun applyShare(text: String, audio: DraftAudio?, problem: ShareProblem?, token: String) {
+        if (token == appliedShare && _state.value.page == FamilyPage.NewCase) return
+        appliedShare = token
+        val previous = _state.value.draftAudio?.file
+        if (previous != null && previous != audio?.file) deleteDraft(previous)
+        val ready = _state.value.members.filter { MemberRules.canVerify(it) }
+        _state.update {
+            it.copy(
+                page = FamilyPage.NewCase,
+                caseText = text.take(TEXT_LIMIT),
+                caseChildId = it.caseChildId ?: ready.singleOrNull()?.id,
+                draftAudio = audio,
+                fromShare = true,
+                error = problem?.let { problemText(it) },
+            )
+        }
+    }
+
+    fun removeDraftAudio() {
+        _state.value.draftAudio?.let { deleteDraft(it.file) }
+        _state.update { it.copy(draftAudio = null) }
+    }
+
+    /** Leaves the draft and deletes the copied voice note. Nothing was uploaded. */
+    fun discardDraft() {
+        _state.value.draftAudio?.let { deleteDraft(it.file) }
+        appliedShare = null
+        _state.update {
+            it.copy(page = FamilyPage.Home, caseText = "", draftAudio = null, fromShare = false, error = null)
+        }
     }
 
     fun refresh(clearError: Boolean = true) {
@@ -80,12 +158,14 @@ class FamilyViewModel(
             try {
                 val members = families.members(familyId)
                 val recent = families.recentCases(familyId)
+                val onlyReady = members.filter { MemberRules.canVerify(it) }.singleOrNull()?.id
                 _state.update {
                     it.copy(
                         loading = false,
                         members = members,
                         recent = recent,
-                        error = if (clearError) null else it.error,
+                        error = if (clearError && !(it.fromShare && it.error != null)) null else it.error,
+                        caseChildId = if (it.page == FamilyPage.NewCase && it.caseChildId == null) onlyReady else it.caseChildId,
                     )
                 }
             } catch (e: ApiException) {
@@ -213,13 +293,26 @@ class FamilyViewModel(
     fun dismissNotice() = _state.update { it.copy(notice = null) }
 
     fun openNewCase() {
-        val ready = _state.value.members.filter { com.familyshield.app.domain.MemberRules.canVerify(it) }
+        _state.value.draftAudio?.let { deleteDraft(it.file) }
+        appliedShare = null
+        val ready = _state.value.members.filter { MemberRules.canVerify(it) }
         _state.update {
-            it.copy(page = FamilyPage.NewCase, caseChildId = ready.singleOrNull()?.id, caseText = "", error = null)
+            it.copy(
+                page = FamilyPage.NewCase,
+                caseChildId = ready.singleOrNull()?.id,
+                caseText = "",
+                draftAudio = null,
+                fromShare = false,
+                error = null,
+            )
         }
     }
 
-    fun closeNewCase() = _state.update { it.copy(page = FamilyPage.Home, error = null) }
+    fun closeNewCase() {
+        _state.value.draftAudio?.let { deleteDraft(it.file) }
+        appliedShare = null
+        _state.update { it.copy(page = FamilyPage.Home, caseText = "", draftAudio = null, fromShare = false, error = null) }
+    }
     fun selectChild(id: String) = _state.update { it.copy(caseChildId = id, error = null) }
     fun setCaseText(value: String) = _state.update { it.copy(caseText = value.take(TEXT_LIMIT), error = null) }
 
@@ -229,12 +322,25 @@ class FamilyViewModel(
             _state.update { it.copy(error = UiText(R.string.new_case_no_children)) }
             return
         }
+        val draft = _state.value.draftAudio
+        val problem = draft?.let { audioProblem(it) }
+        if (problem != null) {
+            _state.update { it.copy(error = problemText(problem)) }
+            return
+        }
         if (_state.value.busy) return
         viewModelScope.launch {
             _state.update { it.copy(busy = true, error = null) }
             try {
-                val opened = cases.open(childId, _state.value.caseText.trim())
-                _state.update { it.copy(busy = false, page = FamilyPage.Home, caseText = "") }
+                val audio = draft?.let {
+                    CaseAudio(it.file, VoiceNotes.uploadName(it.displayName, it.contentType), it.contentType)
+                }
+                val opened = cases.open(childId, _state.value.caseText.trim(), audio)
+                draft?.let { deleteDraft(it.file) }
+                appliedShare = null
+                _state.update {
+                    it.copy(busy = false, page = FamilyPage.Home, caseText = "", draftAudio = null, fromShare = false)
+                }
                 onOpened(opened)
             } catch (e: ApiException) {
                 _state.update { it.copy(busy = false, error = ErrorMessages.of(e)) }
@@ -283,6 +389,41 @@ class FamilyViewModel(
         savedState.remove<String>(KEY_EXPIRES)
     }
 
+    private fun problemText(problem: ShareProblem): UiText = when (problem) {
+        ShareProblem.TOO_LARGE -> UiText(R.string.share_audio_too_large)
+        ShareProblem.EMPTY -> UiText(R.string.share_audio_empty)
+        ShareProblem.UNSUPPORTED -> UiText(R.string.share_audio_unsupported)
+        ShareProblem.UNREADABLE -> UiText(R.string.share_audio_unreadable)
+    }
+
+    private fun audioProblem(draft: DraftAudio): ShareProblem? {
+        if (!draft.contentType.startsWith("audio/")) return ShareProblem.UNSUPPORTED
+        if (!draft.file.isFile) return ShareProblem.UNREADABLE
+        val length = draft.file.length()
+        return when {
+            length <= 0L -> ShareProblem.EMPTY
+            length > VoiceNotes.MAX_BYTES -> ShareProblem.TOO_LARGE
+            else -> null
+        }
+    }
+
+    private fun persistCase(state: FamilyUiState) {
+        savedState[KEY_PAGE] = state.page.name
+        savedState[KEY_CASE_TEXT] = state.caseText
+        if (state.caseChildId == null) savedState.remove<String>(KEY_CASE_CHILD) else savedState[KEY_CASE_CHILD] = state.caseChildId
+        savedState[KEY_FROM_SHARE] = state.fromShare
+        val audio = state.draftAudio
+        if (audio == null) {
+            savedState.remove<String>(KEY_AUDIO_PATH)
+            savedState.remove<String>(KEY_AUDIO_NAME)
+            savedState.remove<String>(KEY_AUDIO_TYPE)
+        } else {
+            savedState[KEY_AUDIO_PATH] = audio.file.absolutePath
+            savedState[KEY_AUDIO_NAME] = audio.displayName
+            savedState[KEY_AUDIO_TYPE] = audio.contentType
+        }
+    }
+
     companion object {
         const val NAME_LIMIT = 200
         const val PHONE_LIMIT = 32
@@ -290,5 +431,21 @@ class FamilyViewModel(
         private const val KEY_SECRET = "invite_secret"
         private const val KEY_NAME = "invite_name"
         private const val KEY_EXPIRES = "invite_expires"
+        internal const val KEY_PAGE = "case_page"
+        internal const val KEY_CASE_TEXT = "case_text"
+        internal const val KEY_CASE_CHILD = "case_child"
+        internal const val KEY_FROM_SHARE = "case_from_share"
+        internal const val KEY_AUDIO_PATH = "case_audio_path"
+        internal const val KEY_AUDIO_NAME = "case_audio_name"
+        internal const val KEY_AUDIO_TYPE = "case_audio_type"
+
+        private fun restoredAudio(savedState: SavedStateHandle): DraftAudio? {
+            val path = savedState.get<String>(KEY_AUDIO_PATH) ?: return null
+            val type = savedState.get<String>(KEY_AUDIO_TYPE) ?: return null
+            if (!type.startsWith("audio/")) return null
+            val file = File(path)
+            if (!file.isFile || file.length() <= 0L || file.length() > VoiceNotes.MAX_BYTES) return null
+            return DraftAudio(file, savedState.get<String>(KEY_AUDIO_NAME) ?: file.name, type)
+        }
     }
 }

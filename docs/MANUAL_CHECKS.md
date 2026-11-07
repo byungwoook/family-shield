@@ -66,7 +66,17 @@ a token from a test app works), then open a case for that child.
 - [ ] No answer for 90 seconds: the phone rings with the fallback call
 - [ ] Uninstall the app, open a case: the dead token goes straight to the call
 
-## 6. Call-only child (milestone 16), needs Twilio and a public URL
+## 6. KakaoTalk voice note (milestone 13, and milestone 10 on iOS)
+
+Not a merge gate. Open question 8 in [PRODUCT_REDESIGN.md](PRODUCT_REDESIGN.md) records what Kakao's help does and does not say. These steps are the thing that help page does not answer. Try a voice message someone else sent, not a file the parent attached from their own camera roll.
+
+- [ ] Android: long-press the voice message. If Family Shield is on the share sheet, share it. The draft shows the file, and nothing is uploaded until Verify. Note the MIME type if you can (adb `dumpsys activity` while the share is delivered).
+- [ ] Android, if Family Shield is not offered: save the voice message, then share that file from Files (My Files). It should open the same draft. Note the extension (m4a, ogg, opus, amr, or something else).
+- [ ] iOS: long-press the voice message and see whether Family Shield (once the Share Extension exists, milestone 10) or Save to Files is offered. If only another app such as Notes is offered, save from there into Files, then share the file. Note the extension.
+- [ ] A voice note over 10 MB is refused on the phone and does not create a case.
+- [ ] Pasted text still opens a draft with no audio.
+
+## 7. Call-only child (milestone 16), needs Twilio and a public URL
 
 With `PUBLIC_BASE_URL` set, add a child by number (`POST .../call-only`) for a
 `+1` handset and a `+82` handset.

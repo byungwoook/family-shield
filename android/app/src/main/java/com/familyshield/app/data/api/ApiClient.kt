@@ -9,10 +9,13 @@ import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import com.familyshield.app.domain.VoiceNotes
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody
+import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import java.io.IOException
@@ -101,8 +104,45 @@ class ApiClient(
 
     // ---------- Cases (parent) ----------
 
-    suspend fun openCase(childMemberId: String, text: String): ParentCase =
-        post(url("v1", "cases"), CreateCaseRequest(childMemberId, text))
+    /**
+     * Opens a case. With [audio], the body is multipart (`child_member_id`,
+     * `text`, file `audio`) and `Content-Length` is set because every part has
+     * a known length. Without [audio], the body stays JSON. Either way this is
+     * the call the parent makes by tapping Verify, not by sharing.
+     */
+    suspend fun openCase(childMemberId: String, text: String, audio: CaseAudio? = null): ParentCase {
+        if (audio == null) {
+            return post(url("v1", "cases"), CreateCaseRequest(childMemberId, text))
+        }
+        rejectUnusable(audio)
+        val multipart = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart("child_member_id", childMemberId)
+            .addFormDataPart("text", text)
+            .addFormDataPart(
+                "audio",
+                VoiceNotes.uploadName(audio.uploadName, audio.contentType),
+                audio.file.asRequestBody(audio.contentType.toMediaType()),
+            )
+            .build()
+        // MultipartBody.contentLength() is the exact byte count. OkHttp then
+        // sends Content-Length instead of chunked transfer. The server rejects
+        // a multipart case that has no numeric Content-Length (411).
+        check(multipart.contentLength() >= 0L)
+        val upload = http.newBuilder()
+            .writeTimeout(2, TimeUnit.MINUTES)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .callTimeout(2, TimeUnit.MINUTES)
+            .build()
+        return execute(
+            url("v1", "cases"),
+            method = "POST",
+            body = multipart,
+            decoder = serializer<ParentCase>(),
+            auth = true,
+            client = upload,
+        )
+    }
 
     suspend fun case(caseId: String): ParentCase = get(url("v1", "cases", caseId))
 
@@ -171,6 +211,7 @@ class ApiClient(
         body: RequestBody?,
         decoder: DeserializationStrategy<T>,
         auth: Boolean,
+        client: OkHttpClient = http,
     ): T {
         val target = url ?: throw ApiException.NotConfigured()
         val request = Request.Builder()
@@ -184,7 +225,7 @@ class ApiClient(
             request.header("Authorization", "Bearer $token")
         }
         val raw = try {
-            http.newCall(request.build()).await()
+            client.newCall(request.build()).await()
         } catch (e: IOException) {
             throw ApiException.Network(e)
         }
@@ -231,10 +272,24 @@ class ApiClient(
         })
     }
 
+    /**
+     * Refuses a voice note the server would refuse, before any socket is opened.
+     * The codes match `POST /v1/cases` so the screen can show the same sentence.
+     */
+    private fun rejectUnusable(audio: CaseAudio) {
+        if (!AUDIO_TYPE.matches(audio.contentType)) {
+            throw ApiException.Http(415, ErrorCodes.UNSUPPORTED_AUDIO)
+        }
+        val length = if (audio.file.isFile) audio.file.length() else -1L
+        if (length <= 0L) throw ApiException.Http(400, ErrorCodes.EMPTY_AUDIO)
+        if (length > VoiceNotes.MAX_BYTES) throw ApiException.Http(413, ErrorCodes.AUDIO_TOO_LARGE)
+    }
+
     enum class Decision(val wire: String) { CONFIRM("confirm"), REJECT("reject") }
 
     companion object {
         private val JSON = "application/json; charset=utf-8".toMediaType()
+        private val AUDIO_TYPE = Regex("audio/[a-z0-9.+-]+")
 
         fun defaultHttpClient(): OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)

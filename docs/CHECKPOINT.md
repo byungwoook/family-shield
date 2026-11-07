@@ -1,20 +1,21 @@
 # 체크포인트: 어디까지 했고, 어떻게 이어가는지
 
-마지막 갱신: 2026-11-07. 백엔드 v1은 main에 병합돼 있고, Android 부모 앱(M12) 화면은 `claude/m12-android-parent`에 구현돼 있다. 에뮬레이터 실행과 Firebase 토큰은 아직 없다. 이 파일만 읽으면 바로 시작할 수 있게 쓴다.
+마지막 갱신: 2026-11-07. 백엔드 v1은 main에 병합돼 있다. Android 부모 앱(M12)은 `claude/m12-android-parent`(초안 PR #13)에 있고, 그 위에 M13 공유 인텐트가 `cursor/m13-android-share-4d8a`에 있다. 에뮬레이터에서 파일을 공유하는 확인과 Firebase 토큰은 아직 없다. 이 파일만 읽으면 바로 시작할 수 있게 쓴다.
 설계의 권위는 [PRODUCT_REDESIGN.md](PRODUCT_REDESIGN.md), API의 권위는 코드와 그것을 옮긴 [API_CONTRACT.md](API_CONTRACT.md)다.
 
 ## 1. 한 줄 요약
 
-백엔드는 v1 범위(M1–M8, M15, M16)가 main에 병합됐다. Android 부모 앱(M12)은 이 브랜치에 구현돼 있고, JVM 단위 테스트와 DEV_AUTH 스모크까지 통과했다. 에뮬레이터에서 손으로 누르는 확인과 FCM 기기 토큰은 남아 있다.
+백엔드는 v1 범위(M1–M8, M15, M16)가 main에 병합됐다. Android 부모 앱(M12)은 `claude/m12-android-parent`에 있다. M13은 그 브랜치에서 갈라진 `cursor/m13-android-share-4d8a`다. `ACTION_SEND`로 들어온 음성·글은 초안이 되고, 확인을 누르기 전에는 올리지 않는다. JVM 테스트는 **56 passed, 1 skipped**(e2e). `assembleDebug`와 `assembleRelease`도 통과했다. 에뮬레이터에서 파일 앱으로 공유하는 확인, 카카오톡을 직접 눌러 보는 확인, FCM 기기 토큰은 남아 있다.
 
 ## 2. PR 스택 (포크 `byungwoook/family-shield`, 원본에는 PR 없음)
 
-#5~#12는 main에 병합됐다. 이 브랜치는 그 main을 병합한 뒤 M12 앱을 올렸다.
+#5~#12는 main에 병합됐다. `claude/m12-android-parent`는 그 main을 병합한 뒤 M12 앱을 올렸다. 이 브랜치(`cursor/m13-android-share-4d8a`)는 거기서 M13만 더한다.
 
 | PR | 브랜치 | 내용 | 상태 |
 |---|---|---|---|
 | #5~#12 | (각 기능 브랜치) | M4~M8, M15, M16 | main에 병합 |
-| #13 (초안) | `claude/m12-android-parent` | M12 Android 부모 앱 | 초안. 에뮬레이터·FCM 기기 토큰이 남음 |
+| #13 (초안) | `claude/m12-android-parent` | M12 Android 부모 앱 | 초안. 에뮬레이터·FCM 기기 토큰이 남음. M13의 베이스 |
+| (이 브랜치) | `cursor/m13-android-share-4d8a` | M13 Android 공유 인텐트 | #13 위에 스택. 에뮬레이터 파일 공유와 카카오톡 수동 확인이 남음 |
 | — | `wip/m12-android-partial` | 컴파일된 적 없는 초안. **병합 금지, 참고만** | 보관 |
 
 `claude/m12-android-parent`에 들어간 것:
@@ -23,7 +24,8 @@
 - `android/`: Gradle 9.4.1 / AGP 9.2.1 / Kotlin 2.2.10 / Compose BOM 2025.06.01 골격(Fitrip 앱과 같은 툴체인). 화면은 자리표시 하나뿐.
 - #12의 보안 수정(운영에서 FastAPI 문서 경로 끄기)까지 병합해 둠.
 - 테스트: 백엔드 전체 **682 passed, 1 skipped**(`PGTZ=UTC`, 2026-11-07 이 환경에서 재확인. 건너뛴 1개는 안내 음성 mp3가 아직 없어서).
-- Android: `assembleDebug`, `assembleRelease`, `testDebugUnitTest` 통과. `-PfsE2eBase` 없이 단위 테스트는 **31 passed, 1 skipped**(e2e). DEV_AUTH 서버를 붙이면 e2e 1개도 통과(**32 passed**). 툴체인은 그대로다. Gradle 래퍼 `networkTimeout`만 10초에서 120초로 늘렸다. 예전에 배포본 다운로드가 그 10초에 끊겼다.
+- Android M12: `assembleDebug`, `assembleRelease`, `testDebugUnitTest` 통과. 그때 `-PfsE2eBase` 없이 단위 테스트는 **31 passed, 1 skipped**(e2e). DEV_AUTH 서버를 붙이면 e2e 1개도 통과(**32 passed**). 툴체인은 그대로다. Gradle 래퍼 `networkTimeout`만 10초에서 120초로 늘렸다.
+- Android M13 (이 브랜치, 2026-11-07): 같은 세 가지를 다시 통과. 단위 테스트는 **56 passed, 1 skipped**(건너뛴 1개는 여전히 e2e). 릴리스 APK에 `10.0.2.2`와 개발자 로그인 문구는 없다. 백엔드는 `PGTZ=UTC`로 **682 passed, 1 skipped**.
 
 ### 2026-11-06 로컬(macOS) 확인 결과
 - 코드 변경 없음. 이 커밋은 문서만 고친다.
@@ -36,9 +38,10 @@
 | 마일스톤 | 상태 |
 |---|---|
 | M1–M8, M15, M16 (백엔드) | 완료, PR #2–#12 |
-| M12 Android 부모 화면 | **앱은 이 브랜치에 있음.** JVM 테스트와 DEV_AUTH 스모크 통과. 에뮬레이터 수동 확인과 FCM 기기 토큰은 남음. PR #13은 초안 |
-| M13 Android 공유 인텐트, M14 Android 자녀 화면 | 시작 전 |
-| M9–M11 iOS | 시작 전. 이 Linux 환경엔 Swift/Xcode가 없어 빌드 검증 불가(Mac 필요) |
+| M12 Android 부모 화면 | `claude/m12-android-parent`. JVM 테스트와 DEV_AUTH 스모크 통과. 에뮬레이터 수동 확인과 FCM 기기 토큰은 남음. PR #13은 초안 |
+| M13 Android 공유 인텐트 | **이 브랜치.** `audio/*`·`text/plain`·`application/ogg` 공유가 초안이 되고, 확인을 눌러야 multipart로 올라간다. 10MB(10 485 760바이트)는 폰에서 거절. JVM 56 passed, 1 skipped. 에뮬레이터에서 파일 앱으로 공유하는 확인과 카카오톡 수동 확인은 남음 |
+| M14 Android 자녀 화면 | 시작 전 |
+| M9–M11 iOS | 시작 전. M13은 iOS 공유(M10)를 포함하지 않는다. 이 Linux 환경엔 Swift/Xcode가 없어 iOS는 빌드하지 않았다(Mac 필요) |
 | M17 발신 번호 표시(iOS/Android) | 시작 전 |
 | M18 해커톤 에이전트 코드 제거 | 마지막에. 앱 자녀 화면이 쓸 만해진 뒤 |
 | M19 Safe Wallet | v1 이후, 법률 검토 후 |
@@ -72,7 +75,7 @@
 ### 5.1 코드 받기
 ```bash
 git clone https://github.com/byungwoook/family-shield.git && cd family-shield
-git checkout claude/m12-android-parent   # 스택 맨 위. #5~#12 변경과 M12 준비가 모두 들어 있다
+git checkout cursor/m13-android-share-4d8a   # M13. 베이스는 claude/m12-android-parent (PR #13)
 ```
 
 ### 5.2 백엔드 (Python 3.13, Postgres)
@@ -132,12 +135,25 @@ venv/bin/uvicorn --factory backend.api:boot --host 0.0.0.0 --port 8000
 - 에뮬레이터/실기기에서 손으로 누르는 확인. 이 환경에는 KVM이 없다.
 - FCM 기기 토큰. `google-services.json`이 없어 등록 호출은 토큰이 없으면 아무것도 하지 않는다.
 - `BiometricPrompt`는 자녀 화면(M14)이다. 부모 M12에는 없다.
-- 음성 공유 인텐트는 M13이다. 이번 범위가 아니다.
 - 릴리스 서명은 디버그 키다.
 
-### 5.5 그다음
-1. M13 공유 인텐트 → M14 Android 자녀 화면.
-2. iOS M9–M11: Mac에서 Xcode로. `docs/API_CONTRACT.md`와 같은 계약을 쓴다.
+### 5.5 M13에서 된 것과 남은 것
+된 것 (`android/README.md`, 이 브랜치):
+- `ACTION_SEND` `audio/*`, `text/plain`, `application/ogg`. 액티비티는 `singleTop`이라 앱이 켜진 채 공유해도 같은 화면이 갱신된다.
+- 음성은 앱 캐시에 복사되고 초안 화면에 붙는다. 확인을 누르기 전에는 `POST /v1/cases`를 호출하지 않는다. 글만 있으면 기존처럼 JSON, 음성이 있으면 multipart이고 `Content-Length`가 있다.
+- m4a, aac, ogg/opus, amr(및 amr-wb)를 `audio/*`로 맞춰 보낸다. 10MB를 넘거나 빈 파일은 올리기 전에 거절한다. `.mp4`·`.webm`·`.3gp`는 보낸 쪽이 이미 audio라고 한 경우만 받는다.
+- 공유 시트에 `application/octet-stream`과 `video/*`는 넣지 않았다. 확장자만으로 모든 제공자를 거를 수 없고, 동영상이 음성으로 올라가면 안 된다.
+- 테스트: 형식 매핑, 10MB 한계, 인텐트 복사, 확인 전에 업로드하지 않음, multipart `Content-Length`, 초안 화면. **56 passed, 1 skipped**.
+
+남은 것:
+- 에뮬레이터/실기기에서 파일 앱으로 음성을 공유해 초안이 열리는지. 이 환경에는 KVM이 없다.
+- 카카오톡이 받은 음성메시지를 다른 앱에 오디오 파일로 넘기는지. 공식 도움말만 읽었고, 기기로 확인하지 못했다. 안 되면 파일 앱으로 공유하거나 글을 붙여 넣는다. [PRODUCT_REDESIGN.md](PRODUCT_REDESIGN.md) 열린 질문 8, [MANUAL_CHECKS.md](MANUAL_CHECKS.md).
+- iOS 공유 확장(M10)은 이 마일스톤이 아니다. 만들지 않았다.
+- M12에서 남은 에뮬레이터 수동 확인, FCM 기기 토큰, 릴리스 서명.
+
+### 5.6 그다음
+1. M14 Android 자녀 화면.
+2. iOS M9–M11: Mac에서 Xcode로. 공유 확장은 M10이다. `docs/API_CONTRACT.md`와 같은 계약을 쓴다.
 3. M17.
 4. 키가 필요한 수동 확인([MANUAL_CHECKS.md](MANUAL_CHECKS.md)).
 5. M18.

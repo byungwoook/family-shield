@@ -11,6 +11,7 @@ import com.familyshield.app.data.api.ApiClient
 import com.familyshield.app.data.session.EncryptedTokenStore
 import com.familyshield.app.data.session.KeystoreKeys
 import com.familyshield.app.data.session.SessionManager
+import com.familyshield.app.share.ShareInbox
 import com.familyshield.app.ui.signin.GoogleSignInClient
 
 /**
@@ -42,6 +43,7 @@ class AppContainer(context: Context) {
     val auth: AuthRepository by lazy { AuthRepository(api, session) }
     val families: FamilyRepository by lazy { FamilyRepository(api) }
     val cases: CaseRepository by lazy { CaseRepository(api) }
+    val shares: ShareInbox by lazy { ShareInbox(appContext) }
     val push: PushRegistrar by lazy { PushRegistrar(ApiPushApi(api), NoFirebaseToken) }
     val google: GoogleSignInClient by lazy { GoogleSignInClient(BuildConfig.GOOGLE_SERVER_CLIENT_ID) }
 

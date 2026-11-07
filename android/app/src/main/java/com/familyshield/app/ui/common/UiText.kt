@@ -57,6 +57,10 @@ object ErrorMessages {
         ErrorCodes.SMS_FAILED -> R.string.error_sms_failed
         ErrorCodes.MEMBER_NOT_CALLABLE -> R.string.error_member_not_callable
         ErrorCodes.RATE_LIMITED -> R.string.error_rate_limited
+        ErrorCodes.AUDIO_TOO_LARGE -> R.string.error_audio_too_large
+        ErrorCodes.UNSUPPORTED_AUDIO -> R.string.error_unsupported_audio
+        ErrorCodes.EMPTY_AUDIO -> R.string.error_empty_audio
+        ErrorCodes.LENGTH_REQUIRED -> R.string.error_length_required
         else -> if (status >= 500) R.string.error_server else R.string.error_generic
     }
 }

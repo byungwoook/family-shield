@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -18,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -33,6 +35,7 @@ import com.familyshield.app.ui.common.FailureBox
 import com.familyshield.app.ui.common.LoadingBox
 import com.familyshield.app.ui.family.CreateFamilyRoute
 import com.familyshield.app.ui.family.CreateFamilyViewModel
+import com.familyshield.app.ui.family.DraftAudio
 import com.familyshield.app.ui.family.FamilyRoute
 import com.familyshield.app.ui.family.FamilyViewModel
 import com.familyshield.app.ui.signin.SignInRoute
@@ -69,40 +72,98 @@ fun AppRoot(container: AppContainer) {
         RootState.SignedOut -> {
             if (LocalContext.current !is Activity) return
             val signIn = viewModel { SignInViewModel(container.auth) }
-            SignInRoute(signIn, container.google, showDevLogin = container.devLogin)
+            val waiting by container.shares.pending.collectAsStateWithLifecycle()
+            SignInRoute(
+                signIn,
+                container.google,
+                showDevLogin = container.devLogin,
+                banner = if (waiting != null) stringResource(R.string.share_waiting_signin) else null,
+            )
         }
         RootState.NeedsFamily -> {
             val create = viewModel { CreateFamilyViewModel(container.families) }
-            CreateFamilyRoute(create, onCreated = rootViewModel::familyCreated, onSignOut = rootViewModel::signOut)
+            val waiting by container.shares.pending.collectAsStateWithLifecycle()
+            CreateFamilyRoute(
+                create,
+                onCreated = rootViewModel::familyCreated,
+                onSignOut = {
+                    container.shares.discardPending()
+                    rootViewModel.signOut()
+                },
+                banner = if (waiting != null) stringResource(R.string.share_waiting_family) else null,
+            )
         }
         is RootState.Parent -> {
             val family = viewModel(key = "family-${current.familyId}") {
-                FamilyViewModel(current.familyId, container.families, container.cases)
+                FamilyViewModel(
+                    current.familyId,
+                    container.families,
+                    container.cases,
+                    deleteDraft = container.shares::delete,
+                )
+            }
+            LaunchedEffect(sessionToken) { family.bindSession(sessionToken) }
+            val pending by container.shares.pending.collectAsStateWithLifecycle()
+            LaunchedEffect(pending?.token) {
+                val share = pending ?: return@LaunchedEffect
+                family.applyShare(
+                    share.text,
+                    share.audio?.let { DraftAudio(it.file, it.displayName, it.contentType) },
+                    share.problem,
+                    share.token,
+                )
+                container.shares.consume(share.token)
             }
             FamilyRoute(
                 viewModel = family,
                 familyName = current.familyName,
                 onOpenCase = { opened: ParentCase -> openCaseId = opened.id },
                 onOpenRecent = { openCaseId = it },
-                onSignOut = rootViewModel::signOut,
+                onSignOut = {
+                    family.discardDraft()
+                    container.shares.discardPending()
+                    rootViewModel.signOut()
+                },
             )
         }
-        is RootState.Child -> Placeholder(
-            title = stringResource(R.string.child_placeholder_title),
-            body = stringResource(R.string.child_placeholder_body, current.familyName),
-            onSignOut = rootViewModel::signOut,
-        )
-        RootState.MembershipPending -> Placeholder(
-            title = stringResource(R.string.membership_pending_title),
-            body = stringResource(R.string.membership_pending_body),
-            onSignOut = rootViewModel::signOut,
-        )
+        is RootState.Child -> {
+            val pending by container.shares.pending.collectAsStateWithLifecycle()
+            Placeholder(
+                title = stringResource(R.string.child_placeholder_title),
+                body = stringResource(R.string.child_placeholder_body, current.familyName),
+                onSignOut = {
+                    container.shares.discardPending()
+                    rootViewModel.signOut()
+                },
+                notice = if (pending != null) stringResource(R.string.share_needs_parent) else null,
+                onDiscardNotice = if (pending != null) container.shares::discardPending else null,
+            )
+        }
+        RootState.MembershipPending -> {
+            val pending by container.shares.pending.collectAsStateWithLifecycle()
+            Placeholder(
+                title = stringResource(R.string.membership_pending_title),
+                body = stringResource(R.string.membership_pending_body),
+                onSignOut = {
+                    container.shares.discardPending()
+                    rootViewModel.signOut()
+                },
+                notice = if (pending != null) stringResource(R.string.share_needs_parent) else null,
+                onDiscardNotice = if (pending != null) container.shares::discardPending else null,
+            )
+        }
         is RootState.Failed -> FailureBox(current.message, onRetry = rootViewModel::retry)
     }
 }
 
 @Composable
-private fun Placeholder(title: String, body: String, onSignOut: () -> Unit) {
+private fun Placeholder(
+    title: String,
+    body: String,
+    onSignOut: () -> Unit,
+    notice: String? = null,
+    onDiscardNotice: (() -> Unit)? = null,
+) {
     Column(
         Modifier.fillMaxSize().padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
@@ -110,6 +171,12 @@ private fun Placeholder(title: String, body: String, onSignOut: () -> Unit) {
     ) {
         Text(title, style = MaterialTheme.typography.headlineSmall)
         Text(body)
+        if (notice != null) {
+            Text(notice, modifier = Modifier.testTag("share_needs_parent"))
+            if (onDiscardNotice != null) {
+                TextButton(onClick = onDiscardNotice) { Text(stringResource(R.string.share_discard)) }
+            }
+        }
         Button(onClick = onSignOut) { Text(stringResource(R.string.action_sign_out)) }
     }
 }

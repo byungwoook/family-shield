@@ -76,13 +76,19 @@ class CreateFamilyViewModel(private val families: FamilyRepository) : ViewModel(
 }
 
 @Composable
-fun CreateFamilyRoute(viewModel: CreateFamilyViewModel, onCreated: (FamilyCreated) -> Unit, onSignOut: () -> Unit) {
+fun CreateFamilyRoute(
+    viewModel: CreateFamilyViewModel,
+    onCreated: (FamilyCreated) -> Unit,
+    onSignOut: () -> Unit,
+    banner: String? = null,
+) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     CreateFamilyContent(
         state = state,
         onNameChange = viewModel::setName,
         onCreate = { viewModel.create(onCreated) },
         onSignOut = onSignOut,
+        banner = banner,
     )
 }
 
@@ -93,6 +99,7 @@ fun CreateFamilyContent(
     onNameChange: (String) -> Unit,
     onCreate: () -> Unit,
     onSignOut: () -> Unit,
+    banner: String? = null,
 ) {
     Scaffold(
         topBar = {
@@ -110,6 +117,9 @@ fun CreateFamilyContent(
                 .padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            if (banner != null) {
+                Text(banner, modifier = Modifier.testTag("share_waiting"))
+            }
             Text(stringResource(R.string.create_family_body), style = MaterialTheme.typography.bodyLarge)
             OutlinedTextField(
                 value = state.name,

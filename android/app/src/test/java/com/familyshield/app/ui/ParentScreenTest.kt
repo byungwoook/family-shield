@@ -1,21 +1,29 @@
 package com.familyshield.app.ui
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import com.familyshield.app.sampleCase
 import com.familyshield.app.sampleChild
 import com.familyshield.app.ui.caseflow.CaseContent
+import com.familyshield.app.ui.family.DraftAudio
 import com.familyshield.app.ui.family.FamilyHomeContent
+import com.familyshield.app.ui.family.FamilyPage
 import com.familyshield.app.ui.family.FamilyUiState
+import com.familyshield.app.ui.family.NewCaseContent
 import com.familyshield.app.ui.theme.FamilyShieldTheme
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import java.io.File
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [33])
@@ -122,6 +130,39 @@ class ParentScreenTest {
         compose.onNodeWithText("Scam").assertIsDisplayed()
         compose.onNodeWithText("Do not send money", substring = true).assertIsDisplayed()
         compose.onNodeWithText("Warn your family").assertIsDisplayed()
+    }
+
+    @Test
+    fun sharedVoiceNoteStaysOnTheDraftUntilVerifyIsTapped() {
+        var verifies = 0
+        val file = File.createTempFile("note", ".m4a").apply { writeBytes(byteArrayOf(1, 2, 3)) }
+        compose.setContent {
+            FamilyShieldTheme {
+                NewCaseContent(
+                    state = FamilyUiState(
+                        loading = false,
+                        page = FamilyPage.NewCase,
+                        fromShare = true,
+                        caseText = "hello",
+                        caseChildId = "child-1",
+                        draftAudio = DraftAudio(file, "voice.m4a", "audio/mp4"),
+                    ),
+                    members = listOf(sampleChild(name = "Mina")),
+                    onBack = {},
+                    onSelect = {},
+                    onText = {},
+                    onVerify = { verifies += 1 },
+                    onRemoveAudio = {},
+                )
+            }
+        }
+        compose.onNodeWithTag("draft_audio").assertIsDisplayed()
+        compose.onNodeWithTag("share_held").assertIsDisplayed()
+        compose.onNodeWithText("Nothing is sent until you tap Verify.").assertIsDisplayed()
+        assertEquals(0, verifies)
+        compose.onNodeWithTag("open_case").performScrollTo().assertIsEnabled().performClick()
+        assertEquals(1, verifies)
+        file.delete()
     }
 }
 

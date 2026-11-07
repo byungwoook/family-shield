@@ -96,6 +96,17 @@
     <string name="new_case_explain">먼저 패밀리 쉴드 앱으로 자녀에게 묻고, 답이 없으면 자녀가 인증한 번호로 전화해요. 결과는 자녀 본인의 답변으로만 정해져요. 확인하는 동안 돈을 보내지 마세요.</string>
     <string name="new_case_submit">확인하기</string>
     <string name="new_case_counter">%1$d / %2$d</string>
+    <string name="new_case_not_sent_yet">확인하기를 누르기 전에는 아무것도 전송되지 않아요.</string>
+    <string name="new_case_audio_attached">음성 메시지가 첨부됐어요: %1$s (%2$d KB). 확인하기를 누르기 전에는 이 휴대폰에만 있어요.</string>
+    <string name="new_case_audio_remove">음성 메시지 빼기</string>
+    <string name="share_audio_too_large">음성 메시지가 10MB를 넘어서 첨부하지 않았어요. 받은 내용을 글로 붙여 넣을 수 있어요.</string>
+    <string name="share_audio_empty">음성 메시지가 비어 있어서 첨부하지 않았어요.</string>
+    <string name="share_audio_unsupported">이 파일은 음성 메시지로 읽을 수 없어요. 받은 내용을 글로 붙여 넣을 수 있어요.</string>
+    <string name="share_audio_unreadable">음성 메시지를 읽지 못했어요. 받은 내용을 글로 붙여 넣을 수 있어요.</string>
+    <string name="share_waiting_signin">확인할 메시지가 대기 중이에요. 보호자로 로그인하세요. 확인하기를 누르기 전에는 아무것도 전송되지 않아요.</string>
+    <string name="share_waiting_family">확인할 메시지가 대기 중이에요. 가족을 만든 뒤 누구에게 물어볼지 고르세요. 확인하기를 누르기 전에는 아무것도 전송되지 않아요.</string>
+    <string name="share_needs_parent">이 계정은 자녀라서 메시지를 확인할 수 없어요. 보호자 계정으로 로그인해 주세요. 전송된 것은 없어요.</string>
+    <string name="share_discard">지우기</string>
     <string name="case_title">%1$s 확인</string>
     <string name="case_dont_send">아직 돈을 보내지 마세요.</string>
     <string name="open_waiting_push">패밀리 쉴드 앱으로 %1$s에게 확인을 요청했어요. 90초 안에 답이 없으면 인증된 번호로 전화할게요.</string>
@@ -193,4 +204,8 @@
     <string name="error_sms_failed">번호는 저장됐지만 문자가 전송되지 않았어요. 잠시 후 다시 시도해 주세요.</string>
     <string name="error_member_not_callable">지금은 이 자녀에게 확인할 수 없어요. 보호자의 승인과 함께 인증된 번호나 앱이 있어야 해요.</string>
     <string name="error_rate_limited">지금은 확인 횟수 한도에 도달했어요. 24시간 동안 자녀당 5번, 전체 10번까지 확인할 수 있어요. 돈을 보내지 말고, 이미 알고 있는 번호로 자녀에게 전화해 보세요.</string>
+    <string name="error_audio_too_large">음성 메시지가 10MB를 넘어요. 더 짧은 녹음을 보내거나 글로 붙여 넣으세요.</string>
+    <string name="error_unsupported_audio">이 파일은 음성 파일이 아니에요.</string>
+    <string name="error_empty_audio">음성 메시지가 비어 있어요.</string>
+    <string name="error_length_required">음성 메시지를 보내지 못했어요. 다시 시도해 주세요.</string>
 </resources>
