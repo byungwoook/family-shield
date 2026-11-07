@@ -1,5 +1,10 @@
 # Secrets
 .env
+*.p8
+*.pem
+*.key
+secrets/
+*service-account*.json
 
 # Python
 __pycache__/

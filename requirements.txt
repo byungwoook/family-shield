@@ -16,8 +16,9 @@ pytest==9.2.0
 argon2-cffi==25.1.0
 # Milestone 3 schema and store (backend/store.py). The hackathon agents do not import this.
 psycopg[binary]==3.3.6
-# Milestone 4 API tests. FastAPI's TestClient imports httpx.
+# Milestone 4 API tests (FastAPI's TestClient), and milestone 8 APNs over HTTP/2.
 httpx==0.28.1
+h2==4.4.1
 # Milestone 5 Apple and Google ID-token checks (backend/signin.py), RS256 via cryptography.
 pyjwt[crypto]==2.15.1
 # Milestone 7 voice-note uploads (multipart/form-data on POST /v1/cases).
