@@ -553,8 +553,9 @@ def test_production_does_not_serve_the_generated_docs():
             **PRODUCTION_SIGN_IN,
         }
     )
+    generated = ("/docs", "/docs/oauth2-redirect", "/redoc", "/openapi.json")
     client = TestClient(app)
-    for path in ("/docs", "/docs/oauth2-redirect", "/redoc", "/openapi.json"):
+    for path in generated:
         assert client.get(path).status_code == 404, path
     dev = boot(
         {
@@ -565,7 +566,9 @@ def test_production_does_not_serve_the_generated_docs():
             "OTP_DERIVATION_KEY": "key",
         }
     )
-    assert TestClient(dev).get("/openapi.json").status_code == 200
+    dev_client = TestClient(dev)
+    for path in generated:
+        assert dev_client.get(path).status_code == 200, path
 
 
 def test_dev_auth_must_be_exactly_one():
