@@ -20,7 +20,7 @@ disagree, the code wins and this file is the bug.
 | Error body | `{"error": "<code>"}` and nothing else, for every error the `/v1/*` handlers produce. The `/allow/*` pages answer errors as HTML, and `/voice/*` answers `403`/`404` with an empty body. |
 | Unknown body fields | Every JSON body model is `extra="forbid"`: an extra field is `400 invalid_body`. Send only the documented fields. |
 | Validation order | FastAPI validates the JSON body (and `?limit`) **before** the handler runs, so a malformed body is `400 invalid_body` even with no `Authorization` header. Exception: `POST /v1/cases` checks the bearer shape first. |
-| Framework errors | An unregistered path (including every `/v1/dev/*` route when `DEV_AUTH` is off, and every `/voice/*` route when Twilio is not configured) is `404 {"detail":"Not Found"}`; a wrong method is `405 {"detail":"Method Not Allowed"}`. These bodies use `detail`, not `error`. FastAPI's default `GET /docs`, `/docs/oauth2-redirect`, `/redoc`, and `/openapi.json` are registered (the app does not turn them off) and answer `200`. |
+| Framework errors | An unregistered path (including every `/v1/dev/*` route when `DEV_AUTH` is off, and every `/voice/*` route when Twilio is not configured) is `404 {"detail":"Not Found"}`; a wrong method is `405 {"detail":"Method Not Allowed"}`. These bodies use `detail`, not `error`. `GET /docs`, `/docs/oauth2-redirect`, `/redoc`, and `/openapi.json` are registered only when `DEV_AUTH=1` and then answer `200`. With `DEV_AUTH` off they are not registered and answer `404 {"detail":"Not Found"}`. |
 | Server errors | `500 unavailable` (unexpected exception, transaction rolled back), `500 config` (server misconfiguration, e.g. missing pepper or a naive clock). |
 
 ### Errors any authenticated route can return
@@ -99,7 +99,7 @@ Only `sub` is trusted. Email and the token's name claim are ignored. `display_na
 | GET/POST | `/allow/{secret}`, `/allow/{secret}/otp`, `/allow/{secret}/confirm` | browser (SMS link), HTML | 200 |
 | GET | `/voice/prompts/{language}/{name}.mp3` | Twilio only (unsigned) | 200 `audio/mpeg` |
 | POST | `/voice/twilio/{outbound,code,answer,status}` | Twilio only (signed) | 200 TwiML |
-| GET | `/docs`, `/docs/oauth2-redirect`, `/redoc`, `/openapi.json` | public (FastAPI defaults) | 200 |
+| GET | `/docs`, `/docs/oauth2-redirect`, `/redoc`, `/openapi.json` | public, **DEV** | 200 |
 
 ## 5. Routes
 
