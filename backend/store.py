@@ -11,6 +11,9 @@ code or a static salt has to be chosen. This module does not call
 `datetime.now` or `secrets`. A one-time code is not kept. The row stores a
 nonce, and `call_code` derives the digits from that nonce.
 
+Session rows, the dev helper that marks a child callable, and one call
+attempt row are written here too. None of them commit.
+
 See tests/test_store.py for the readings this file locks in.
 """
 
@@ -449,6 +452,204 @@ def reissue_one_time(conn, case_id: UUID, *, now: datetime, rng=None) -> dict:
     return _view(conn, fresh, now)
 
 
+def ensure_user(
+    conn,
+    *,
+    auth_provider: str,
+    auth_subject: str,
+    display_name: str,
+    locale: str,
+    now: datetime,
+) -> UUID:
+    """Return the user for this subject, creating one when it is new.
+
+    A concurrent insert rolls back to a savepoint and reads the winner.
+    Display name and locale stay as they were on the first insert.
+    """
+    _require_aware(now, "now")
+    existing = _user_id(conn, auth_provider, auth_subject)
+    if existing is not None:
+        return existing
+    try:
+        with conn.transaction():
+            return create_user(
+                conn,
+                auth_provider=auth_provider,
+                auth_subject=auth_subject,
+                display_name=display_name,
+                locale=locale,
+                now=now,
+            )
+    except pg_errors.UniqueViolation:
+        found = _user_id(conn, auth_provider, auth_subject)
+        if found is None:
+            raise
+        return found
+
+
+def create_session(
+    conn,
+    *,
+    user_id: UUID,
+    token_hash: str,
+    expires_at: datetime,
+) -> UUID:
+    """Store the hash of a session token. The plaintext is not a parameter."""
+    _require_aware(expires_at, "expires_at")
+    if not isinstance(token_hash, str) or len(token_hash) < 32 or token_hash.strip() == "":
+        raise ValueError("token_hash_too_short")
+    row = _one(
+        conn,
+        """
+        INSERT INTO sessions (user_id, token_hash, expires_at)
+        VALUES (%s, %s, %s)
+        RETURNING id
+        """,
+        (user_id, token_hash, expires_at),
+    )
+    return row["id"]
+
+
+def session_user(conn, token_hash: str, *, now: datetime) -> dict | None:
+    """The user behind this hash, or None when it is missing, expired, or revoked.
+
+    Expiry is `now >= expires_at`. A missing row and a dead row look the same.
+    """
+    _require_aware(now, "now")
+    if not isinstance(token_hash, str):
+        return None
+    row = _one(
+        conn,
+        """
+        SELECT s.user_id, s.expires_at, s.revoked_at, u.display_name, u.locale
+        FROM sessions AS s
+        JOIN users AS u ON u.id = s.user_id
+        WHERE s.token_hash = %s
+        """,
+        (token_hash,),
+    )
+    if row is None or row["revoked_at"] is not None or now >= row["expires_at"]:
+        return None
+    return {
+        "user_id": row["user_id"],
+        "display_name": row["display_name"],
+        "locale": row["locale"],
+    }
+
+
+def memberships_for_user(conn, user_id: UUID) -> list:
+    """Non-removed memberships for this user."""
+    return _all(
+        conn,
+        """
+        SELECT id, family_id, role, status
+        FROM family_members
+        WHERE user_id = %s AND status <> 'removed'
+        ORDER BY created_at ASC, id ASC
+        """,
+        (user_id,),
+    )
+
+
+def member_contact(conn, member_id: UUID) -> dict | None:
+    """The membership columns the API needs to authorize a request.
+
+    No code hash, salt, or nonce.
+    """
+    return _one(
+        conn,
+        """
+        SELECT
+            id, family_id, user_id, role, display_name, status,
+            phone_e164, phone_opted_in_at, phone_current_since,
+            confirmed_by_parent_at, push_token
+        FROM family_members
+        WHERE id = %s
+        """,
+        (member_id,),
+    )
+
+
+def active_parent(conn, user_id: UUID, family_id: UUID) -> dict | None:
+    row = _one(
+        conn,
+        """
+        SELECT id
+        FROM family_members
+        WHERE user_id = %s AND family_id = %s
+          AND role = 'parent' AND status = 'active'
+        """,
+        (user_id, family_id),
+    )
+    return row
+
+
+def mark_member_callable(
+    conn,
+    member_id: UUID,
+    phone_e164: str,
+    *,
+    now: datetime,
+    user_id: UUID | None = None,
+) -> None:
+    """Mark an invited child active with an opted-in number. No SMS is sent.
+
+    The first completion sets `phone_opted_in_at`, `phone_current_since`,
+    and `confirmed_by_parent_at` to `now`. Repeating it for the same number
+    does not move those clocks. A different number is refused. `user_id`,
+    when passed, links the child account; a user who already belongs to a
+    family cannot be linked.
+    """
+    _require_aware(now, "now")
+    _require_e164(phone_e164)
+    member = _lock_member(conn, member_id)
+    if member["role"] != "child":
+        raise ValueError("not_a_child")
+    if member["status"] == "removed":
+        raise ValueError("member_removed")
+    if user_id is not None:
+        _bind_child_user(conn, member_id, user_id)
+    if member["phone_e164"] is None:
+        complete_phone_otp(conn, member_id, phone_e164, now=now, pending=False)
+    elif member["phone_e164"] != phone_e164:
+        raise ValueError("phone_already_set")
+    _execute(
+        conn,
+        """
+        UPDATE family_members
+        SET status = 'active',
+            phone_current_since = COALESCE(phone_current_since, %s),
+            confirmed_by_parent_at = COALESCE(confirmed_by_parent_at, %s),
+            user_id = COALESCE(%s, user_id)
+        WHERE id = %s
+        """,
+        (now, now, user_id, member_id),
+    )
+
+
+def lock_case(conn, case_id: UUID, *, now: datetime) -> dict:
+    """The case view with the row locked. The caller commits."""
+    _require_aware(now, "now")
+    row = _load(conn, case_id, lock=True)
+    if row is None:
+        raise CaseNotFound(str(case_id))
+    return _view(conn, row, now)
+
+
+def record_call_attempt(conn, case_id: UUID, *, now: datetime) -> None:
+    """One accepted call attempt. `provider_ref` stays null until a real sid exists."""
+    _require_aware(now, "now")
+    _execute(
+        conn,
+        """
+        INSERT INTO verification_attempts (
+            case_id, channel, status, provider, started_at
+        ) VALUES (%s, 'call', 'sent', 'twilio', %s)
+        """,
+        (case_id, now),
+    )
+
+
 def call_code(conn, case_id: UUID, *, now: datetime) -> str | None:
     """Digits derived from the stored nonce, or None when none can be shown.
 
@@ -655,6 +856,42 @@ def _assert_phone_available(conn, phone_e164: str, *, member_id: UUID | None, pe
         if owns_phone or owns_pending:
             raise PhoneInUse("phone_in_use")
     return False
+
+
+def _bind_child_user(conn, member_id: UUID, user_id: UUID) -> None:
+    user = _one(conn, "SELECT id FROM users WHERE id = %s", (user_id,))
+    if user is None:
+        raise ValueError("user_not_found")
+    rows = _all(
+        conn,
+        """
+        SELECT id, status
+        FROM family_members
+        WHERE user_id = %s
+        FOR UPDATE
+        """,
+        (user_id,),
+    )
+    for row in rows:
+        if row["id"] == member_id:
+            continue
+        if row["status"] != "removed":
+            raise ValueError("user_already_in_a_family")
+
+
+def _user_id(conn, auth_provider: str, auth_subject: str) -> UUID | None:
+    row = _one(
+        conn,
+        """
+        SELECT id
+        FROM users
+        WHERE auth_provider = %s AND auth_subject = %s
+        """,
+        (auth_provider, auth_subject),
+    )
+    if row is None:
+        return None
+    return row["id"]
 
 
 def _lock_member(conn, member_id: UUID) -> dict:
