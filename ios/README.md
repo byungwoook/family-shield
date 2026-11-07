@@ -16,6 +16,7 @@ Nothing here is a real secret. Replace these before a signed run:
 | `group.com.familyshield.app` | App Group in the app and Share Extension entitlements | Create the group for `com.familyshield.app` and `com.familyshield.app.share` |
 | APNs | `aps-environment` is `development` on Debug and `production` on Release | APNs Auth Key (`.p8`), Key ID, and the team id, as `APNS_*` on the server. The `.p8` stays out of git. |
 | API origin | Debug Info.plist `FSApiBase` is `http://127.0.0.1:8000`. Release is empty. | A device on the LAN can set the scheme environment variable `FS_API_BASE` to `http://<mac-ip>:8000`. A store build needs https. |
+| `+15555550100` | `FS_OUTBOUND_CALLER_ID` in [project.yml](project.yml) | The one number the Call Directory extension labels "Family Shield". A placeholder, not a Twilio account. Set it to `TWILIO_FROM_NUMBER` before a real call, and do not commit that number if you would rather keep the placeholder. |
 
 ## Build on a Mac
 
@@ -49,7 +50,7 @@ The home screen lists children and recent cases. Add a child and show the invite
 
 Verify opens `POST /v1/cases` with optional pasted text. Nothing is uploaded before that tap. `member_not_callable` and `rate_limited` are errors, not cases. The case screen polls `GET /v1/cases/{id}` about every 3 seconds while it is visible and the colour is open, and stops when the case is decided. Green, red, and yellow use the same sentences as Android, in English and Korean. A red result offers the copyable family warning. The pilot notice names Apple for sign-in and notifications, where Android names Google.
 
-`POST /v1/me/push-token` is implemented (`provider=apns`, `env=sandbox` on Debug and `production` on Release) for a parent. There is no device token in this environment, so registration does nothing until a signed build receives one. The notification text is the server's generic sentence. This milestone does not add a Share Extension or Face ID.
+`POST /v1/me/push-token` is implemented (`provider=apns`, `env=sandbox` on Debug and `production` on Release) for a parent and for a child. There is no device token in this environment, so registration does nothing until a signed build receives one. The notification text is the server's generic sentence.
 
 UI tests (`ParentUITests`) launch the app with `--ui-test` and cover an empty family, a child who is not confirmed (Verify disabled), a yellow result, a red result, the Korean red copy, and a shared draft that is not uploaded until Verify. They need the simulator. The same screens are also asserted by `swift test` through `ParentFixtures`, and the voice-note rules (types, 10 MB cap, local copy) are in the package tests.
 
@@ -64,3 +65,7 @@ KakaoTalk on a real phone is not a merge gate. The manual check is in [docs/MANU
 The same binary. A signed-in user with no family can create one or enter the parent's invite code (`POST /v1/invites/accept`). The child then enters a `+1` or `+82` number, the SMS code (or "call me with the code"), and a 4-digit check code twice. The first save sends `biometric_ok: false`. Replacing a code requires Face ID and sends `biometric_ok: true`. An `active` membership skips the phone step. Until the parent confirms, the child waits.
 
 The question opens from a push (`kind=money_request`, `case_id`). There is no child case list. Yes and No call `POST /v1/cases/{id}/answer` only after `LAContext` policy `deviceOwnerAuthentication` succeeds (Face ID, or the device passcode when Face ID is unavailable). Not now posts nothing, so the case stays open and the backend can fall through to the call. While the case is `calling`, the same check calls `GET /v1/cases/{id}/call-code` and shows the 6 digits. That value stays in memory until the child hides it or the case leaves `calling`. Preferences store two booleans per member (phone verified, check code set), never a code. The notification is the fixed sentence from the API contract: no Yes/No action and no code. `NSFaceIDUsageDescription` is set. The manual device steps are in [docs/MANUAL_CHECKS.md](../docs/MANUAL_CHECKS.md).
+
+## Label our outbound number (milestone 17)
+
+Optional. The check code works without it. The child home and the waiting screen offer "Open the system setting", which opens Settings > Phone > Call Blocking & Identification. The Call Directory extension `com.familyshield.app.calldirectory` adds one identification entry, the configured outbound caller id, labeled "Family Shield". It does not add a blocking entry, and it does not contain the child's number. An incoming call that shows the child's number is not labeled genuine. The number comes from the build setting `FS_OUTBOUND_CALLER_ID` (placeholder `+15555550100`). There is no backend route. Turning the extension on in Settings, then bringing the app forward, reloads it. The manual steps are in [docs/MANUAL_CHECKS.md](../docs/MANUAL_CHECKS.md).

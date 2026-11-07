@@ -13,6 +13,9 @@ val apiBase = providers.gradleProperty("fsApiBase").orNull
 // The OAuth "server" (web) client id the Google ID token is requested for. It is
 // the backend's GOOGLE_SERVER_CLIENT_ID. Blank: Google sign-in is hidden.
 val googleServerClientId = providers.gradleProperty("fsGoogleServerClientId").getOrElse("")
+// The number this build labels as "Family Shield". Placeholder, not a Twilio account.
+// Set -PfsOutboundCallerId=+1... to the same value as TWILIO_FROM_NUMBER.
+val outboundCallerId = providers.gradleProperty("fsOutboundCallerId").getOrElse("+15555550100")
 
 fun quoted(value: String) = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
@@ -28,6 +31,7 @@ android {
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "GOOGLE_SERVER_CLIENT_ID", quoted(googleServerClientId))
+        buildConfigField("String", "OUTBOUND_CALLER_ID", quoted(outboundCallerId))
     }
 
     buildTypes {

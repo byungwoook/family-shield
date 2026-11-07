@@ -279,6 +279,13 @@ public enum CopyKey: String, CaseIterable, Sendable {
     case errorOtpRateLimited = "error_otp_rate_limited"
     case errorOtpUnavailable = "error_otp_unavailable"
     case errorOtpSmsFailed = "error_otp_sms_failed"
+    case outboundLabelTitle = "outbound_label_title"
+    case outboundLabelBody = "outbound_label_body"
+    case outboundLabelOpenSettings = "outbound_label_open_settings"
+    case outboundLabelUnavailable = "outbound_label_unavailable"
+    case outboundLabelOn = "outbound_label_on"
+    case outboundLabelOff = "outbound_label_off"
+    case callerLabelBody = "caller_label_body"
 }
 
 public enum AppLocale: String, Sendable, Equatable {
@@ -1402,6 +1409,34 @@ public enum CopyCatalog {
         .errorOtpSmsFailed: [
             .en: "The text didn't go through. Please try again.",
             .ko: "문자가 전달되지 않았어요. 다시 시도해 주세요.",
+        ],
+        .outboundLabelTitle: [
+            .en: "Label Family Shield's call",
+            .ko: "패밀리 쉴드 전화 표시",
+        ],
+        .outboundLabelBody: [
+            .en: "Optional. The check code works without this. This labels one number, the number Family Shield calls from, as Family Shield, so the phone does not treat that call as an unknown caller. It does not mark your number or any other number as genuine. On Android, only one app can hold call screening, so turning this on replaces another screening app.",
+            .ko: "선택 사항입니다. 확인 번호만으로도 됩니다. 패밀리 쉴드가 거는 번호 하나만 Family Shield로 표시해서, 그 전화가 모르는 번호로 조용히 되지 않게 합니다. 본인의 번호나 다른 번호를 진짜라고 표시하지 않습니다. Android에서는 통화 스크리닝을 맡은 앱이 하나뿐이라, 이것을 켜면 다른 스크리닝 앱을 대신합니다.",
+        ],
+        .outboundLabelOpenSettings: [
+            .en: "Open the system setting",
+            .ko: "시스템 설정 열기",
+        ],
+        .outboundLabelUnavailable: [
+            .en: "This phone doesn't offer call screening. The check code still works.",
+            .ko: "이 휴대폰은 통화 스크리닝을 제공하지 않아요. 확인 번호는 그대로 쓸 수 있어요.",
+        ],
+        .outboundLabelOn: [
+            .en: "Call labeling is on.",
+            .ko: "전화 표시가 켜져 있어요.",
+        ],
+        .outboundLabelOff: [
+            .en: "Call labeling is off. The check code still works.",
+            .ko: "전화 표시가 꺼져 있어요. 확인 번호는 그대로 쓸 수 있어요.",
+        ],
+        .callerLabelBody: [
+            .en: "Family Shield is calling for your family.",
+            .ko: "패밀리 쉴드가 가족을 대신해 전화하고 있어요.",
         ],
     ]
 }

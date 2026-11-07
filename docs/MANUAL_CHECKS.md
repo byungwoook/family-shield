@@ -166,3 +166,45 @@ On a simulator with a simulated Face ID (Features > Face ID > Enrolled), then on
 - [ ] While that call is in progress, Face ID reveals the 6-digit code. It is not on the lock screen
 - [ ] Resetting the check code asks for Face ID again, and the old code no longer works on a call
 - [ ] A sandbox device token is registered with `POST /v1/me/push-token` (`env=sandbox` on a Debug build)
+
+## 12. Label our outbound number (milestone 17), needs a Mac and an Android phone or emulator
+
+Not run here. This environment has no Xcode, no iOS simulator, and no Android emulator (no KVM). `swift test` covers the one-number directory. The Android unit tests cover the allow decision, the manifest, and the child-home control. The steps below are the ones that need a handset. Do them in the same batch as sections 8–11.
+
+The labeled number is a placeholder, `+15555550100`, until you point the build at the Twilio caller id. Set that to the same E.164 as `TWILIO_FROM_NUMBER`. Do not commit the real number if you want the placeholder to stay in git.
+
+Android, from `android/`:
+
+```bash
+./gradlew assembleDebug -PfsOutboundCallerId=+1XXXXXXXXXX
+```
+
+iOS, from `ios/project.yml`, set `FS_OUTBOUND_CALLER_ID` to that same E.164, then:
+
+```bash
+brew install xcodegen   # if it is not already installed
+xcodegen generate
+xcodebuild -project FamilyShield.xcodeproj -scheme FamilyShield \
+  -destination 'platform=iOS Simulator,name=iPhone 16' \
+  -configuration Debug \
+  CODE_SIGNING_ALLOWED=NO \
+  build
+```
+
+`CODE_SIGNING_ALLOWED=NO` only checks that the Call Directory target compiles. Enabling the extension needs a signed install, so use the team id for the simulator and device runs below. The extension bundle id is `com.familyshield.app.calldirectory`. It needs no App Group.
+
+On the iOS simulator (Settings > Phone > Call Blocking & Identification), then on a device that can receive the Twilio call:
+
+- [ ] Family Shield is listed. Turn it on. The child home says call labeling is on after you return to the app
+- [ ] Leave it off and confirm the check code still works (section 11). The control is optional
+- [ ] A call from `TWILIO_FROM_NUMBER` shows the name Family Shield
+- [ ] A call that presents the child's own number is not labeled Family Shield, and nothing on that screen says the caller is genuine
+- [ ] The extension has one entry. It is not a list of scam numbers
+
+On an Android emulator or device, API 29 or later (the role does not exist before Android 10):
+
+- [ ] The child home offers "Open the system setting". Grant call screening. Only one app can hold it; this replaces another screening app
+- [ ] A call from `TWILIO_FROM_NUMBER` rings (it is not silenced or rejected) and a banner says Family Shield. The banner is not a yes or a no
+- [ ] A call from any other number, including the child's, rings and is not labeled Family Shield
+- [ ] The system permission prompt does not ask for contacts, and the app does not ask to record audio
+- [ ] Decline the role, or turn it off in system settings, and confirm the check code still works (section 8)
