@@ -70,6 +70,7 @@ fun FamilyRoute(
             onSelect = viewModel::selectChild,
             onText = viewModel::setCaseText,
             onVerify = { viewModel.verify(onOpenCase) },
+            onRemoveAudio = viewModel::removeDraftAudio,
         )
         return
     }
@@ -459,6 +460,7 @@ fun NewCaseContent(
     onSelect: (String) -> Unit,
     onText: (String) -> Unit,
     onVerify: () -> Unit,
+    onRemoveAudio: () -> Unit,
 ) {
     Scaffold(
         topBar = {
@@ -479,6 +481,19 @@ fun NewCaseContent(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(stringResource(R.string.new_case_explain))
+            if (state.fromShare) {
+                Text(stringResource(R.string.new_case_not_sent_yet), modifier = Modifier.testTag("share_held"))
+            }
+            state.draftAudio?.let { audio ->
+                val kilobytes = ((audio.file.length().coerceAtLeast(0L) + 1023L) / 1024L).toInt().coerceAtLeast(1)
+                Text(
+                    stringResource(R.string.new_case_audio_attached, audio.displayName, kilobytes),
+                    modifier = Modifier.testTag("draft_audio"),
+                )
+                TextButton(onClick = onRemoveAudio, enabled = !state.busy, modifier = Modifier.testTag("remove_audio")) {
+                    Text(stringResource(R.string.new_case_audio_remove))
+                }
+            }
             Text(stringResource(R.string.new_case_child_heading), style = MaterialTheme.typography.titleMedium)
             if (members.isEmpty()) {
                 Text(stringResource(R.string.new_case_no_children))

@@ -96,6 +96,17 @@
     <string name="new_case_explain">We ask your child in the Family Shield app first, then call the number they verified. Only their answer decides the result. Don\'t send money while we check.</string>
     <string name="new_case_submit">Verify</string>
     <string name="new_case_counter">%1$d / %2$d</string>
+    <string name="new_case_not_sent_yet">Nothing is sent until you tap Verify.</string>
+    <string name="new_case_audio_attached">Voice note attached: %1$s (%2$d KB). It stays on this phone until you tap Verify.</string>
+    <string name="new_case_audio_remove">Remove voice note</string>
+    <string name="share_audio_too_large">That voice note is over 10 MB, so it wasn\'t attached. You can paste the message instead.</string>
+    <string name="share_audio_empty">That voice note was empty, so it wasn\'t attached.</string>
+    <string name="share_audio_unsupported">Family Shield can\'t read that file as a voice note. You can paste the message instead.</string>
+    <string name="share_audio_unreadable">That voice note couldn\'t be read. You can paste the message instead.</string>
+    <string name="share_waiting_signin">A message is waiting. Sign in as a parent. Nothing is sent until you tap Verify.</string>
+    <string name="share_waiting_family">A message is waiting. Create your family, then choose who to ask. Nothing is sent until you tap Verify.</string>
+    <string name="share_needs_parent">This account is a child, so it can\'t verify a message. Sign in as a parent. Nothing was sent.</string>
+    <string name="share_discard">Discard</string>
     <string name="case_title">Check for %1$s</string>
     <string name="case_dont_send">Don\'t send money yet.</string>
     <string name="open_waiting_push">We asked %1$s to confirm in the Family Shield app. If there\'s no answer in 90 seconds, we\'ll call the number they verified.</string>
@@ -193,4 +204,8 @@
     <string name="error_sms_failed">The number was saved, but the text didn\'t go through. Please try again later.</string>
     <string name="error_member_not_callable">This child can\'t be checked right now. They need to be confirmed by you and have a verified number or the app.</string>
     <string name="error_rate_limited">You\'ve reached the limit for now: 5 checks per child and 10 in total in 24 hours. Don\'t send money; call your child on the number you already know.</string>
+    <string name="error_audio_too_large">That voice note is over 10 MB. Try a shorter one, or paste the message.</string>
+    <string name="error_unsupported_audio">That file isn\'t an audio voice note.</string>
+    <string name="error_empty_audio">That voice note was empty.</string>
+    <string name="error_length_required">The voice note couldn\'t be sent. Please try again.</string>
 </resources>

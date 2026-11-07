@@ -568,7 +568,7 @@ Concrete consequences already reflected above:
 - SMS OTP to `+1` is ordinary. SMS to a Korean mobile needs a sender ID the Korean carriers will accept. Milestone 5 includes one real OTP to a `+82` number the owner controls. If that send is blocked, the same milestone delivers the OTP with a short Twilio call that speaks the six digits with `<Say>`, which is not the verification call and does not collect a verdict.
 - Clocks in UTC, shown in the device timezone. A parent in Seoul and a server in California cannot share `datetime.now()` the way the Guardian does today.
 
-A voice note enters through the iOS Share Extension or the Android `ACTION_SEND` intent (`audio/*` and `text/plain`). Both write the file into app storage and open a draft. The parent still picks the child and taps Verify. Sharing does not start a call. Whether KakaoTalk on iOS or Android actually offers a received voice note as audio to another app is unproven in this repo. It is an open question. Pasted text works either way.
+A voice note enters through the iOS Share Extension or the Android `ACTION_SEND` intent (`audio/*` and `text/plain`). Both write the file into app storage and open a draft. The parent still picks the child and taps Verify. Sharing does not start a call. Whether KakaoTalk on iOS or Android actually offers a received voice note as audio to another app is still not verified on a device. Open question 8 records what Kakao's published help does and does not say, and the fallback. Pasted text works either way.
 
 ## Security and privacy
 
@@ -779,7 +779,7 @@ New `android/` Kotlin project. Google Sign-In (with a nonce, checked by `POST /v
 
 ### M13. Android share intent
 
-`ACTION_SEND` for `audio/*` and `text/plain` opens a draft in the main activity. Nothing is uploaded until the parent taps Verify. Test by sharing a file from the Files app on an emulator. KakaoTalk is the manual check in the open question below, not a merge gate.
+`ACTION_SEND` for `audio/*` and `text/plain` opens a draft in the main activity. Nothing is uploaded until the parent taps Verify. Test by sharing a file from the Files app on an emulator. KakaoTalk is the manual check in the open question below, not a merge gate. The client also accepts `application/ogg` (Opus is sometimes labeled that way) and maps messenger filenames such as `.m4a`, `.aac`, `.ogg`, `.opus`, and `.amr` onto an `audio/*` type before upload. A file over 10 MB (10 485 760 bytes) is refused on the phone and is not uploaded. The share sheet does not register for `application/octet-stream` or `video/*`: Android cannot filter those by extension across every provider, and a video must not be sent as a voice note. Open question 8 is the KakaoTalk research; it does not change this milestone.
 
 ### M14. Android app, child path
 
@@ -823,7 +823,23 @@ These defaults are what the milestones assume. An answer changes a milestone. It
 
 6. **Is 30 days the right transcript retention, and is a Korean parent owed a specific privacy notice (PIPA) beyond the sign-up sentence?** Default: 30 days, and a short in-app notice that names Family Shield, Cartesia, Twilio, Anthropic, and Apple or Google. A lawyer should read that notice before a public store release. The pilot can use the same text stamped "pilot".
 7. **Where does Postgres run?** Default: a host that gives a `DATABASE_URL` with encryption at rest. A Supabase Postgres project is fine. The Supabase storage API and client library are not used.
-8. **KakaoTalk share behavior.** Can KakaoTalk on iOS and on Android share a received voice note as an audio file to another app? Someone has to try both. If one of them cannot, that platform's share milestone still ships for the Files app, and parents paste text.
+8. **KakaoTalk share behavior.** Can KakaoTalk on iOS and on Android share a received voice note as an audio file to another app? Still open. Nobody has tried it on a device for this repo. A 2026-11-07 read of Kakao's published help, done without a KakaoTalk account and without a phone, did not answer it.
+
+What Kakao's own help actually says:
+
+- Windows KakaoTalk can download a voice note that was received on the phone. "Can I save the video clips/voice notes that I received in the mobile version on my PC?" ([cs.kakao.com 1073181287](https://cs.kakao.com/helps_html/1073181287?locale=en)) says to use the Download menu and pick a folder. It does not name the file type, and it is the PC app, not the phone share sheet.
+- KakaoTalk PC can *send* these audio types into a chat: mp3, wav, flac, tta, tak, aac, wma, ogg, and m4a ([cs.kakao.com 1073181264](https://cs.kakao.com/helps_html/1073181264?locale=en)). That is a file going into KakaoTalk, not a received voice note coming out to another app.
+- Exporting a chat ([cs.kakao.com 1073209354](https://cs.kakao.com/helps_html/1073209354?locale=ko)): Android offers "텍스트만 보내기" or "모든 메시지 내부저장소에 저장". iOS offers "텍스트 메시지만 보내기" or "모든 메시지 도큐멘트로 저장하기". The page does not say whether "all messages" includes the voice-note audio.
+- Chat *backup* is a different feature. It stores text only and excludes photo and video file messages ([cs.kakao.com 1073209319](https://cs.kakao.com/helps_html/1073209319)). Voice notes are not mentioned there.
+- Kakao Developers documents sending template messages into KakaoTalk. DevTalk threads show other apps can `ACTION_SEND` audio *into* KakaoTalk. Neither describes KakaoTalk offering a received voice note to another app.
+
+What is not verified:
+
+- No official page found that says the iOS or Android voice-message bubble gives the audio file to another app's share target.
+- Third-party guides disagree with each other (some describe an Android long-press Save, some an iOS Share to Files as m4a, one says iOS must hop through Notes and also that a transcription app can be a direct share target). They are not evidence. No one published the MIME type or the stream URI that KakaoTalk would put on an `ACTION_SEND`.
+- This environment cannot install KakaoTalk or open a share sheet. Someone with an iPhone and an Android phone still has to try both.
+
+Fallback, unchanged: M13 (Android) and M10 (iOS) ship for a share from the Files app. If KakaoTalk will not hand the voice note to Family Shield in one step, the parent saves or exports the audio and shares that file from Files, or pastes the message as text. Nothing in the share path is uploaded before Verify. The manual check is in [MANUAL_CHECKS.md](MANUAL_CHECKS.md).
 9. **A device assertion on `/answer`?** App Attest on iOS, Play Integrity on Android. Default: not in v1. Add it if session tokens show up from somewhere other than the app.
 10. **Younger siblings.** Default: the product is for college students, and we do not add a child account for a minor in v1.
 11. **Accounts the milestones need from the owner:** Apple Developer (bundle id, APNs key), Google / Firebase (Android package name, Google Sign-In client, FCM service account), and Twilio (a number that can call `+1` and `+82`, plus SMS). Backend milestones M1–M4 need none of these. M5 needs Twilio SMS. M6 needs Twilio voice.

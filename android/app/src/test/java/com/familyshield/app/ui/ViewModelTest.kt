@@ -9,6 +9,7 @@ import com.familyshield.app.data.PushRegistrar
 import com.familyshield.app.data.PushTokenSource
 import com.familyshield.app.data.api.ApiClient
 import com.familyshield.app.data.api.ApiException
+import com.familyshield.app.data.api.CaseAudio
 import com.familyshield.app.data.api.CaseSummary
 import com.familyshield.app.data.api.ChildInvite
 import com.familyshield.app.data.api.InviteReissued
@@ -99,7 +100,7 @@ class ViewModelTest {
         try {
             val families = FakeFamilies(members = emptyList())
             val gateway = object : CaseGateway {
-                override suspend fun open(childMemberId: String, text: String): ParentCase {
+                override suspend fun open(childMemberId: String, text: String, audio: CaseAudio?): ParentCase {
                     throw ApiException.Http(400, "member_not_callable")
                 }
                 override suspend fun case(caseId: String) = sampleCase()
@@ -123,7 +124,7 @@ class ViewModelTest {
         try {
             val families = FakeFamilies(members = emptyList())
             val vm = FamilyViewModel("fam-1", families, object : CaseGateway {
-                override suspend fun open(childMemberId: String, text: String) = sampleCase()
+                override suspend fun open(childMemberId: String, text: String, audio: CaseAudio?) = sampleCase()
                 override suspend fun case(caseId: String) = sampleCase()
             })
             advanceUntilIdle()
@@ -172,6 +173,9 @@ class ViewModelTest {
         assertEquals(R.string.error_rate_limited, ErrorMessages.forCode(429, "rate_limited"))
         assertEquals(R.string.error_member_not_callable, ErrorMessages.forCode(400, "member_not_callable"))
         assertEquals(R.string.error_network, ErrorMessages.resOf(ApiException.Network(java.io.IOException("down"))))
+        assertEquals(R.string.error_audio_too_large, ErrorMessages.forCode(413, "audio_too_large"))
+        assertEquals(R.string.error_unsupported_audio, ErrorMessages.forCode(415, "unsupported_audio"))
+        assertEquals(R.string.error_empty_audio, ErrorMessages.forCode(400, "empty_audio"))
     }
 }
 

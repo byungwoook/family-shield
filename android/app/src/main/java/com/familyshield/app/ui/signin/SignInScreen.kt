@@ -96,6 +96,7 @@ fun SignInRoute(
     viewModel: SignInViewModel,
     google: GoogleSignInClient,
     showDevLogin: Boolean,
+    banner: String? = null,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -107,6 +108,7 @@ fun SignInRoute(
         onGoogle = { viewModel.googleSignIn(locale) { hashed -> google.requestIdToken(context, hashed) } },
         onDevNameChange = viewModel::setDevName,
         onDevSignIn = { viewModel.devSignIn(locale) },
+        banner = banner,
     )
 }
 
@@ -118,6 +120,7 @@ fun SignInContent(
     onGoogle: () -> Unit,
     onDevNameChange: (String) -> Unit,
     onDevSignIn: () -> Unit,
+    banner: String? = null,
 ) {
     Scaffold { padding ->
         Column(
@@ -129,6 +132,9 @@ fun SignInContent(
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Spacer(Modifier.height(32.dp))
+            if (banner != null) {
+                Text(banner, modifier = Modifier.testTag("share_waiting"))
+            }
             Text(stringResource(R.string.app_name), style = MaterialTheme.typography.headlineLarge)
             Text(stringResource(R.string.signin_tagline), style = MaterialTheme.typography.bodyLarge)
             Text(stringResource(R.string.signin_promise), style = MaterialTheme.typography.bodyMedium)

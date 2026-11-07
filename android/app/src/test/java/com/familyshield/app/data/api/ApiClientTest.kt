@@ -1,6 +1,7 @@
 package com.familyshield.app.data.api
 
 import com.familyshield.app.data.api.ApiClient.Decision
+import com.familyshield.app.domain.VoiceNotes
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
@@ -12,7 +13,10 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Assert.assertNotNull
 import org.junit.Test
+import java.io.File
+import java.io.RandomAccessFile
 
 class ApiClientTest {
     private val server = MockWebServer()
@@ -146,6 +150,64 @@ class ApiClientTest {
     }
 
     @Test
+    fun voiceNoteIsMultipartWithContentLengthAndJsonStaysJson() = runTest {
+        val file = File.createTempFile("voice", ".m4a").apply { writeBytes(byteArrayOf(0, 1, 2, 70, 83)) }
+        val opened = client.openCase("child-3", "용돈", CaseAudio(file, "voice.m4a", "audio/mp4"))
+        assertEquals("case-9", opened.id)
+        val request = seen.single()
+        assertEquals("POST", request.method)
+        assertTrue(request.getHeader("Content-Type")!!.startsWith("multipart/form-data"))
+        val length = request.getHeader("Content-Length")
+        assertNotNull(length)
+        assertTrue(length!!.all { it.isDigit() })
+        assertEquals(request.bodySize, length.toLong())
+        assertEquals(null, request.getHeader("Transfer-Encoding"))
+        val body = request.body.snapshot().utf8()
+        assertTrue(body.contains("name=\"child_member_id\""))
+        assertTrue(body.contains("child-3"))
+        assertTrue(body.contains("name=\"text\""))
+        assertTrue(body.contains("용돈"))
+        assertTrue(body.contains("name=\"audio\""))
+        assertTrue(body.contains("filename=\"voice.m4a\""))
+        assertTrue(body.contains("Content-Type: audio/mp4"))
+        assertTrue(request.body.snapshot().utf8().contains("FS") || body.contains("FS"))
+
+        seen.clear()
+        client.openCase("child-3", "plain")
+        val json = seen.single()
+        assertTrue(json.getHeader("Content-Type")!!.startsWith("application/json"))
+        assertFalse(json.body.snapshot().utf8().contains("filename="))
+        file.delete()
+    }
+
+    @Test
+    fun aVoiceNoteOverTheLimitIsRefusedBeforeTheRequest() = runTest {
+        val big = File.createTempFile("big", ".m4a")
+        RandomAccessFile(big, "rw").use { it.setLength(VoiceNotes.MAX_BYTES + 1) }
+        val error = runCatching {
+            client.openCase("child-3", "", CaseAudio(big, "big.m4a", "audio/mp4"))
+        }.exceptionOrNull() as ApiException.Http
+        assertEquals(413, error.status)
+        assertEquals(ErrorCodes.AUDIO_TOO_LARGE, error.code)
+        assertTrue(seen.isEmpty())
+        val empty = File.createTempFile("empty", ".aac")
+        val emptyError = runCatching {
+            client.openCase("child-3", "", CaseAudio(empty, "e.aac", "audio/aac"))
+        }.exceptionOrNull() as ApiException.Http
+        assertEquals(ErrorCodes.EMPTY_AUDIO, emptyError.code)
+        val badType = File.createTempFile("clip", ".mp4").apply { writeBytes(byteArrayOf(1)) }
+        val typeError = runCatching {
+            client.openCase("child-3", "", CaseAudio(badType, "clip.mp4", "video/mp4"))
+        }.exceptionOrNull() as ApiException.Http
+        assertEquals(415, typeError.status)
+        assertEquals(ErrorCodes.UNSUPPORTED_AUDIO, typeError.code)
+        assertTrue(seen.isEmpty())
+        big.delete()
+        empty.delete()
+        badType.delete()
+    }
+
+    @Test
     fun blankBaseIsNotConfigured() = runTest {
         val unconfigured = ApiClient("", { "t" })
         val error = runCatching { unconfigured.me() }.exceptionOrNull()
@@ -163,6 +225,9 @@ class ApiClientTest {
         }
         if (path == "/v1/cases" && raw.contains("child-2")) {
             return json(429, """{"error":"rate_limited","extra":"ignored"}""")
+        }
+        if (path == "/v1/cases" && request.method == "POST") {
+            return json(201, """{"id":"case-9","family_id":"fam-1","child_member_id":"child-3","child_display_name":"Mina","state":"calling","result":null,"color":"open","parent_text":"","transcript":null,"claims":null,"pattern_id":null,"timeline":["start"],"created_at":"2026-11-07T00:00:00+00:00","updated_at":"2026-11-07T00:00:00+00:00","decided_at":null}""")
         }
         val ok = when {
             path == "/v1/me" -> """{"user_id":"user-1","display_name":"Ada","locale":"en","memberships":[{"member_id":"m1","family_id":"fam-1","family_name":"Lee","role":"parent","status":"active","display_name":"Ada","extra":1}],"extra":true}"""

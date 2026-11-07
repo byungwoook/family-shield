@@ -2,6 +2,7 @@ package com.familyshield.app.data
 
 import com.familyshield.app.data.api.ApiClient
 import com.familyshield.app.data.api.ApiClient.Decision
+import com.familyshield.app.data.api.CaseAudio
 import com.familyshield.app.data.api.CaseSummary
 import com.familyshield.app.data.api.ChildInvite
 import com.familyshield.app.data.api.DevLoginRequest
@@ -104,15 +105,16 @@ fun interface CaseSource {
 
 /** Opening a case as well as reading it. */
 interface CaseGateway : CaseSource {
-    suspend fun open(childMemberId: String, text: String): ParentCase
+    /** [audio] is sent only for this call. A null audio case stays JSON. */
+    suspend fun open(childMemberId: String, text: String, audio: CaseAudio? = null): ParentCase
 }
 
 class CaseRepository(private val api: ApiClient) : CaseGateway {
     // The last body seen per case, so the case screen can draw at once after POST /v1/cases.
     private val lastSeen = ConcurrentHashMap<String, ParentCase>()
 
-    override suspend fun open(childMemberId: String, text: String): ParentCase =
-        api.openCase(childMemberId, text.take(TEXT_LIMIT)).also { lastSeen[it.id] = it }
+    override suspend fun open(childMemberId: String, text: String, audio: CaseAudio?): ParentCase =
+        api.openCase(childMemberId, text.take(TEXT_LIMIT), audio).also { lastSeen[it.id] = it }
 
     override suspend fun case(caseId: String): ParentCase =
         api.case(caseId).also { lastSeen[it.id] = it }
