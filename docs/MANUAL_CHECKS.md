@@ -96,3 +96,34 @@ Not run here: this environment has no KVM, so BiometricPrompt cannot be approved
 - [ ] BiometricPrompt, then Yes or No. Not now does not answer, and after 90 seconds the phone rings
 - [ ] While that call is in progress, BiometricPrompt reveals the 6-digit code. It is not on the lock screen
 - [ ] Resetting the check code asks for biometrics again, and the old code no longer works on a call
+
+## 9. iOS parent path (milestone 9), needs a Mac
+
+Not run here: this environment has no Xcode or macOS. `swift test` in `ios/FamilyShieldCore` covers the API models, phone and check-code shape, and the English and Korean result sentences. The steps below are the ones that need a simulator.
+
+Replace `TEAMID` in `ios/project.yml` with the Apple Developer team id. Set the server's `APPLE_BUNDLE_ID` and `APNS_TOPIC` to `com.familyshield.app` (or to the bundle id if you change it). Enable Sign in with Apple on that App ID. Do not commit the team id if you would rather keep the placeholder, and do not commit an APNs `.p8`.
+
+Start the API the way [CHECKPOINT.md](CHECKPOINT.md) describes, with `DEV_AUTH=1` and `PGTZ=UTC`, on port 8000.
+
+```bash
+brew install xcodegen
+cd ios
+xcodegen generate
+cd FamilyShieldCore && swift test && cd ..
+xcodebuild -project FamilyShield.xcodeproj -scheme FamilyShield \
+  -destination 'platform=iOS Simulator,name=iPhone 16' \
+  -configuration Debug test
+```
+
+`test` runs `ParentUITests`: empty family, Verify disabled before the parent confirms the child, yellow `wrong`, red `not_sent`, and the Korean red sentence. If the simulator name differs, pick an installed iPhone simulator.
+
+Then run the signed Debug app on that simulator against the local API (the debug build's API base is `http://127.0.0.1:8000`):
+
+- [ ] Developer sign-in (debug only) creates a parent, a family, and shows an invite code once
+- [ ] A child who is not confirmed has Verify disabled
+- [ ] Confirming that child, then Verify with pasted text, polls until a yellow or red result. With the fake call provider, a wrong code is yellow and never red
+- [ ] The red screen offers the family warning and does not say to send money
+- [ ] Switching the simulator language to Korean shows the Korean sentences
+- [ ] Release has no developer sign-in and no `127.0.0.1` default (`xcodebuild -configuration Release CODE_SIGNING_ALLOWED=NO build`, then search the built Info.plist)
+
+A physical device uses `FS_API_BASE=http://<mac-lan-ip>:8000` on the scheme. Sign in with Apple on that device needs the capability above. Face ID, the Share Extension, and a real APNs token are later sections.

@@ -1,22 +1,23 @@
 # 체크포인트: 어디까지 했고, 어떻게 이어가는지
 
-마지막 갱신: 2026-11-07. 백엔드 v1과 Android 부모 앱(M12), 공유 인텐트(M13)는 main에 병합돼 있다. 이 브랜치는 M14 Android 자녀 화면이다. 에뮬레이터 생체 인증, 파일 공유, Firebase 토큰은 아직 없다. 이 파일만 읽으면 바로 시작할 수 있게 쓴다.
+마지막 갱신: 2026-11-07. 백엔드 v1과 Android 부모·공유·자녀 앱(M12–M14)은 main에 병합돼 있다. 이 브랜치는 M9 iOS 부모 화면이다. 시뮬레이터, Face ID, 공유 확장, APNs 기기 토큰은 아직 없다. 이 파일만 읽으면 바로 시작할 수 있게 쓴다.
 설계의 권위는 [PRODUCT_REDESIGN.md](PRODUCT_REDESIGN.md), API의 권위는 코드와 그것을 옮긴 [API_CONTRACT.md](API_CONTRACT.md)다.
 
 ## 1. 한 줄 요약
 
-백엔드는 v1 범위(M1–M8, M15, M16)가 main에 병합됐다. Android 부모 앱(M12)과 공유 인텐트(M13)도 main에 있다. 이 브랜치는 M14 자녀 화면이다. 초대 수락, +1/+82 번호와 문자 코드, 확인 번호 두 번 입력, FCM 등록 호출, 생체 인증 뒤 예/아니요, 통화 중 6자리 코드, 확인 번호 재설정이다. JVM 테스트는 **77 passed, 1 skipped**(e2e). `assembleDebug`와 `assembleRelease`도 통과했다. 백엔드는 `PGTZ=UTC`로 **682 passed, 1 skipped**. 에뮬레이터 생체 인증, 파일 공유, 카카오톡, FCM 기기 토큰은 남아 있다.
+백엔드는 v1 범위(M1–M8, M15, M16)가 main에 병합됐다. Android 부모 앱(M12), 공유 인텐트(M13), 자녀 화면(M14)도 main에 있다. 이 브랜치는 M9 iOS 부모 화면이다. Apple 로그인(nonce), 가족 만들기, 초대 코드 한 번 표시, 가입 승인, 텍스트로 케이스 열기, 3초 폴링, 초록/빨강/노랑(en, ko). UIKit 없는 로직은 `ios/FamilyShieldCore`에서 `swift test`로 **18 passed**. 백엔드 경로는 추가하지 않았다. 백엔드는 `PGTZ=UTC`로 **682 passed, 1 skipped**. Xcode 시뮬레이터, Face ID, 공유 확장, APNs 기기 토큰은 남아 있다.
 
 ## 2. PR 스택 (포크 `byungwoook/family-shield`, 원본에는 PR 없음)
 
-#5~#14는 main에 병합됐다. 이 브랜치(`cursor/m14-android-child-308a`)는 그 main에서 M14만 더한다.
+#5~#15는 main에 병합됐다. 이 브랜치(`cursor/m9-ios-parent-4516`)는 그 main에서 M9만 더한다.
 
 | PR | 브랜치 | 내용 | 상태 |
 |---|---|---|---|
 | #5~#12 | (각 기능 브랜치) | M4~M8, M15, M16 | main에 병합 |
 | #13 | `claude/m12-android-parent` | M12 Android 부모 앱 | main에 병합. 에뮬레이터·FCM 기기 토큰은 여전히 수동 |
 | #14 | `cursor/m13-android-share-4d8a` | M13 Android 공유 인텐트 | main에 병합. 에뮬레이터 파일 공유와 카카오톡 수동 확인은 남음 |
-| #15 | `cursor/m14-android-child-308a` | M14 Android 자녀 화면 | main 기준. 에뮬레이터 생체 인증과 FCM 기기 토큰은 남음 |
+| #15 | `cursor/m14-android-child-308a` | M14 Android 자녀 화면 | main에 병합. 에뮬레이터 생체 인증과 FCM 기기 토큰은 남음 |
+| — | `cursor/m9-ios-parent-4516` | M9 iOS 부모 화면 | 이 브랜치. 시뮬레이터 수동 확인과 APNs 기기 토큰은 남음 |
 | — | `wip/m12-android-partial` | 컴파일된 적 없는 초안. **병합 금지, 참고만** | 보관 |
 
 `claude/m12-android-parent`에 들어간 것:
@@ -42,8 +43,9 @@
 | M1–M8, M15, M16 (백엔드) | 완료, PR #2–#12 |
 | M12 Android 부모 화면 | main (PR #13). JVM 테스트와 DEV_AUTH 스모크 통과. 에뮬레이터 수동 확인과 FCM 기기 토큰은 남음 |
 | M13 Android 공유 인텐트 | main (PR #14). `audio/*`·`text/plain`·`application/ogg` 공유가 초안이 되고, 확인을 눌러야 multipart로 올라간다. 10MB(10 485 760바이트)는 폰에서 거절. 에뮬레이터에서 파일 앱으로 공유하는 확인과 카카오톡 수동 확인은 남음 |
-| M14 Android 자녀 화면 | **PR #15.** 초대·번호·OTP·확인 번호·생체 인증 답변·통화 코드·재설정. JVM 77 passed, 1 skipped. 에뮬레이터 생체 인증과 FCM 기기 토큰은 남음. 백엔드 경로는 추가하지 않음 |
-| M9–M11 iOS | 시작 전. M13은 iOS 공유(M10)를 포함하지 않는다. 이 Linux 환경엔 Swift/Xcode가 없어 iOS는 빌드하지 않았다(Mac 필요) |
+| M14 Android 자녀 화면 | main (PR #15). JVM 77 passed, 1 skipped. 에뮬레이터 생체 인증과 FCM 기기 토큰은 남음. 백엔드 경로는 추가하지 않음 |
+| M9 iOS 부모 화면 | **이 브랜치.** SwiftUI + XcodeGen `ios/project.yml`. `swift test` 18 passed. 시뮬레이터 UI 테스트와 Apple 로그인 기기 확인은 남음. 백엔드 경로는 추가하지 않음 |
+| M10–M11 iOS | 시작 전. 공유 확장은 M10, 자녀 화면(Face ID)은 M11 |
 | M17 발신 번호 표시(iOS/Android) | 시작 전 |
 | M18 해커톤 에이전트 코드 제거 | 마지막에. 앱 자녀 화면이 쓸 만해진 뒤 |
 | M19 Safe Wallet | v1 이후, 법률 검토 후 |
@@ -67,7 +69,8 @@
 - **API 시각이 DB 세션 시간대를 따른다.** `_iso()`(`backend/api.py`)가 Postgres가 돌려준 `timestamptz`를 그대로 `isoformat()`해서, 서버 시간대가 `America/Chicago`면 `-06:00`으로 나간다. 시각 자체는 맞지만 계약 예시(`+00:00`)와 테스트는 UTC를 가정한다. 고치지 않았다. 연결 시 세션을 UTC로 고정(`options="-c TimeZone=UTC"`)하거나 `_iso()`에서 UTC로 바꾸는 방안 중 결정 필요. 그 전까지는 `PGTZ=UTC`를 붙여 테스트·서버를 돌린다.
 
 ### 정해 둔 기본값 (바꾸려면 말하면 됨)
-- Android 패키지명 `com.familyshield.app`(`-PfsApplicationId`로 변경 가능).
+- Android 패키지명 `com.familyshield.app`(`-PfsApplicationId`로 변경 가능). iOS 번들 ID도 같은 값이다. 서버 `APPLE_BUNDLE_ID`와 `APNS_TOPIC`이 이 값이어야 한다.
+- iOS 서명 팀 ID는 `ios/project.yml`의 `TEAMID` 자리표시자다. 실제 팀 ID와 APNs `.p8`은 넣지 않는다.
 - 자녀당 케이스 상한은 **부모 1명 기준** 하루 5건, 부모당 10건.
 - 앱 없는 자녀 링크 유효기간 72시간, 초대 코드 24시간.
 - Claude 분석 기본 모델 `claude-sonnet-5-5`(`CLAUDE_MODEL`), 서버 측 거절 폴백 켬.
@@ -77,7 +80,7 @@
 ### 5.1 코드 받기
 ```bash
 git clone https://github.com/byungwoook/family-shield.git && cd family-shield
-git checkout cursor/m14-android-child-308a   # M14. 베이스는 main (M12·M13 병합 후)
+git checkout cursor/m9-ios-parent-4516   # M9. 베이스는 main (M12–M14 병합 후)
 ```
 
 ### 5.2 백엔드 (Python 3.13, Postgres)
@@ -177,8 +180,32 @@ venv/bin/uvicorn --factory backend.api:boot --host 0.0.0.0 --port 8000
 - 자녀 수신함 API는 추가하지 않았다. 질문 화면은 푸시의 `case_id`로 연다.
 - 재설치하면 번호 화면이 다시 나온다. 서버가 `phone_already_set` 또는 `biometric_required`를 주면 코드를 바꾸지 않고 다음 단계로 간다. `GET /v1/me`에는 번호·확인 번호 여부가 없다.
 
-### 5.7 그다음
-1. iOS M9–M11: Mac에서 Xcode로. 공유 확장은 M10, 자녀 화면은 M11이다. `docs/API_CONTRACT.md`와 같은 계약을 쓴다.
+### 5.7 M9에서 된 것과 남은 것
+된 것 (`ios/README.md`, 이 브랜치):
+- Xcode 프로젝트는 커밋하지 않는다. `ios/project.yml`(XcodeGen)이 원본이다. Mac에서 `xcodegen generate`로 만든다.
+- UIKit이 필요 없는 로직은 `ios/FamilyShieldCore`다. 이 Linux에서 Swift 6.2.1로 `swift test` **18 passed**. API 모델, +1/+82 번호, 4자리 확인 번호 모양, 결과 문구(en/ko), 확인 버튼 조건, 폴링이 결정되거나 401이면 멈추는 규칙.
+- 화면은 SwiftUI. Apple 로그인 버튼은 시스템 버튼이다. nonce는 `POST /v1/auth/nonce`의 raw를 SHA-256 hex로 요청에 넣고, 서버에는 raw를 보낸다. 세션 토큰은 이 기기 키체인에만 둔다.
+- 디버그 빌드만 개발자 로그인(`POST /v1/dev/login`)과 `http://127.0.0.1:8000`이 있다. 릴리스 Info.plist에는 그 주소가 없고, 개발자 로그인 문구는 `#if DEV_LOGIN` 안에만 있다.
+- 부모 화면은 Android M12와 같다. 가족 만들기, 초대 코드 한 번(복사·공유, 붙여넣기는 60초 후 로컬에서 사라짐), 재발급, 가입 승인/거절, 번호 변경 승인/거절, 앱 없는 자녀(+1/+82), 텍스트로 케이스, 약 3초 폴링, 초록/빨강/노랑, 빨강은 가족 경고 복사. 확인은 `active`이고 `confirmed_at`이 있을 때만.
+- 자녀로 로그인한 계정은 가족을 만들 수 없다. 자녀 화면은 M11까지 자리표시만 보여 준다.
+- `POST /v1/me/push-token`(`apns`, 디버그는 `sandbox`, 릴리스는 `production`)은 토큰이 있을 때만 호출한다. 이 환경에는 토큰이 없다.
+- UI 테스트 소스(`ParentUITests`)는 빈 가족, 승인 전 자녀(확인 버튼 비활성), 노랑, 빨강, 한국어 빨강을 시뮬레이터에서 연다. 여기서는 실행하지 못했다. 같은 화면 상태는 `ParentFixtures`로 `swift test`가 확인한다.
+- 백엔드는 고치지 않았다. `docs/API_CONTRACT.md`도 그대로다.
+- Info.plist와 entitlements는 Python `plistlib`으로 XML을 읽었다. 릴리스 plist에 `127.0.0.1`은 없다. `plutil`은 이 Linux에 없다.
+
+남은 것:
+- Mac에서 시뮬레이터로 빌드·UI 테스트·개발자 로그인 흐름. [MANUAL_CHECKS.md](MANUAL_CHECKS.md) 9절. 이 환경에는 Xcode가 없다.
+- Sign in with Apple 실제 로그인, APNs 키, 팀 ID. 자리표시자만 있다.
+- M10 공유 확장, M11 Face ID 자녀 화면.
+
+소유자가 볼 결정:
+- 번들 ID를 Android 패키지명과 같은 `com.familyshield.app`로 뒀다. `APPLE_BUNDLE_ID`와 `APNS_TOPIC`을 이 값으로 맞춘다.
+- 팀 ID는 `TEAMID`다. 서명된 실행 전에 `ios/project.yml`에서 바꾼다.
+- 초대 코드 복사는 로컬 클립보드에 60초만 둔다.
+- 시범 안내 문구는 Android가 Google이라고 쓴 자리에 Apple을 넣었다.
+
+### 5.8 그다음
+1. iOS M10 공유 확장, 그다음 M11 자녀 화면(Face ID). 이 브랜치 위에 쌓는다.
 2. M17.
 3. 키가 필요한 수동 확인([MANUAL_CHECKS.md](MANUAL_CHECKS.md)).
 4. M18.
