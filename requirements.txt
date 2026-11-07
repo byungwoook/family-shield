@@ -1,25 +1,19 @@
-# Tested with Python 3.13 (3.10+ should work)
-uagents==0.26.1
-uagents-core==0.4.12
+# Tested with Python 3.13 (3.10+ should work). Python 3.12 also runs the suite.
 anthropic==2.3.0
 python-dotenv==1.2.4
 requests==2.34.2
-supabase==2.33.0
-# Cartesia is called over plain HTTPS with requests; the keypad-code webhook needs these two
+# Product API (backend/api.py) and the digit-folding webhook (services/code_webhook.py).
 fastapi==0.162.0
 uvicorn==0.54.0
-# Moss semantic search (family directory + scam reports)
-moss==1.21.0
-# Milestone 1 state-machine tests. The hackathon agents do not import this.
 pytest==9.2.0
-# Milestone 2 check codes (backend/codes.py). The hackathon agents do not import this.
+# Check codes (backend/codes.py).
 argon2-cffi==25.1.0
-# Milestone 3 schema and store (backend/store.py). The hackathon agents do not import this.
+# Schema and store (backend/store.py).
 psycopg[binary]==3.3.6
-# Milestone 4 API tests (FastAPI's TestClient), and milestone 8 APNs over HTTP/2.
+# API tests (FastAPI's TestClient), and APNs over HTTP/2 (backend/push.py).
 httpx==0.28.1
 h2==4.4.1
-# Milestone 5 Apple and Google ID-token checks (backend/signin.py), RS256 via cryptography.
+# Apple and Google ID-token checks (backend/signin.py).
 pyjwt[crypto]==2.15.1
-# Milestone 7 voice-note uploads (multipart/form-data on POST /v1/cases).
+# Voice-note uploads (multipart/form-data on POST /v1/cases).
 python-multipart==0.0.33

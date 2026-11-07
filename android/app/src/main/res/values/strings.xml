@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- values/ and values-ko/ keep the same keys and format arguments (StringTablesTest checks it).
-     Result copy: docs/PRODUCT_REDESIGN.md "Copy the app must not regress" and the Guardian
-     paragraphs (agents/guardian/agent.py). Pattern labels: backend/patterns.json. -->
+     Result copy: docs/PRODUCT_REDESIGN.md "Copy the app must not regress".
+     Pattern labels: backend/patterns.json. -->
 <resources>
     <string name="app_name">Family Shield</string>
     <string name="action_retry">Try again</string>

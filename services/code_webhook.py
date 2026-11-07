@@ -1,31 +1,14 @@
-"""Receives what the student enters on the keypad during the Family Shield call. Owner: Teammate A (P2).
+"""Digit folding, and the old keypad webhook.
 
-The Cartesia call agent sends two things here through its webhook tools:
-  1. verify_code: the 4-digit check code
-  2. confirm_sent: the answer to "Did you send your family a message asking for money?" (1 yes, 2 no)
-This module only receives them; whoever starts it decides what they mean (the Verifier agent).
+The product call is Twilio (`backend/calls.py`). It uses `_digits` from this
+module and does not use `_yes_no`. `make_app` is the webhook the tests still
+exercise. The Cartesia agent that used to post here is on the git tag
+`hackathon-demo`.
 
-Inside the Verifier agent:
+If a handler raises or takes longer than HANDLER_TIMEOUT_SECS, the reply is
+RECORDED and the error type is logged. The digits are not logged.
 
-    from services.code_webhook import ASK, RECORDED, RETRY, start_in_background
-
-    async def on_code(case_id: str, digits: str) -> str:
-        #   right code -> return ASK (the call then asks "did you send that message?")
-        #   wrong code -> return RETRY once, then RECORDED (call ends, case not confirmed)
-        ...
-
-    async def on_answer(case_id: str, answer: str) -> str:   # answer is "yes", "no" or ""
-        ...                                                  # tell the Guardian, return RECORDED
-
-    @agent.on_event("startup")
-    async def start_code_webhook(ctx):
-        start_in_background(on_code, on_answer)
-
-Return fast: the call agent waits on each reply. Do slow work (ctx.send to the Guardian) in
-asyncio.create_task(...). If a handler raises or takes longer than HANDLER_TIMEOUT_SECS, the student
-hears the safe reply (RECORDED) and the error is logged.
-
-Standalone test (no agents): python -m services.code_webhook
+Standalone: python -m services.code_webhook
 """
 import asyncio
 import hmac
@@ -49,7 +32,7 @@ CODE_WEBHOOK_PORT = int(os.getenv("CODE_WEBHOOK_PORT") or "8090")
 RECORDED = "recorded"
 RETRY = "retry"
 ASK = "ask"  # right code: now ask "did you send that message?"
-# Cartesia's tool timeout is 10s (cartesia_setup.py). Answer well before it so the agent never improvises.
+# Answer well inside a caller's tool timeout. A slow handler must not invent a verdict.
 HANDLER_TIMEOUT_SECS = 5
 
 log = logging.getLogger(__name__)
