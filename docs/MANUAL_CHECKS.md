@@ -141,3 +141,28 @@ On the simulator, share a voice note from the Files app (an `.m4a` under 10 MB):
 - [ ] A file over 10 MB is refused on the phone and does not create a case
 - [ ] Pasted text still opens a draft with no audio
 - [ ] KakaoTalk: long-press a voice message someone else sent. If Family Shield is offered, share it and note the type. If it is not, save the file and share it from Files. Note the extension. This is open question 8, not a merge gate.
+
+## 11. iOS child path and APNs (milestone 11), needs a Mac and an Apple Developer account
+
+Not run here. Face ID needs a device (the simulator can enroll a simulated face, but this environment has no simulator). APNs needs the Auth Key.
+
+On the Apple Developer account, for bundle id `com.familyshield.app`:
+
+- Team id replaces `TEAMID` in `ios/project.yml`
+- Sign in with Apple capability
+- Push Notifications capability (the entitlements already set `aps-environment` to `development` on Debug and `production` on Release)
+- App Group `group.com.familyshield.app` for the app and `com.familyshield.app.share`
+- APNs Auth Key (`.p8`), Key ID, and team id as `APNS_KEY_FILE`, `APNS_KEY_ID`, `APNS_TEAM_ID`. `APNS_TOPIC` is the bundle id. Do not commit the `.p8`.
+
+`NSFaceIDUsageDescription` is in the Info plist. The child gate uses `LAContext` policy `deviceOwnerAuthentication`, so the device passcode is offered when Face ID is unavailable.
+
+Same generate and test command as section 9. `testNotNowLeavesTheQuestionWithoutAnswering` and `testResetHidesTheNewCodeUntilFaceID` are in that run. They do not post an answer and they do not show a code before Face ID.
+
+On a simulator with a simulated Face ID (Features > Face ID > Enrolled), then on a device:
+
+- [ ] Accept an invite, enter a `+1` or `+82` number, enter the SMS code from the server log (`DevOtp`), and set the 4-digit check code twice
+- [ ] A push opens the question. The notification is only "Family Shield needs you to confirm a request." It has no Yes/No action and no code
+- [ ] Face ID, then Yes or No. Not now does not answer, and after 90 seconds the phone rings
+- [ ] While that call is in progress, Face ID reveals the 6-digit code. It is not on the lock screen
+- [ ] Resetting the check code asks for Face ID again, and the old code no longer works on a call
+- [ ] A sandbox device token is registered with `POST /v1/me/push-token` (`env=sandbox` on a Debug build)

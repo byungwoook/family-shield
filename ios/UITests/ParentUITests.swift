@@ -35,6 +35,21 @@ final class ParentUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Warn your family"].exists)
     }
 
+    func testNotNowLeavesTheQuestionWithoutAnswering() {
+        let app = launch("notNow")
+        XCTAssertTrue(app.staticTexts["child_question"].waitForExistence(timeout: 5))
+        app.buttons["not_now"].tap()
+        XCTAssertTrue(app.staticTexts["still_open"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["child_question"].exists)
+    }
+
+    func testResetHidesTheNewCodeUntilFaceID() {
+        let app = launch("resetLocked")
+        XCTAssertTrue(app.buttons["reset_unlock"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.textFields["check_code"].exists)
+        XCTAssertFalse(app.staticTexts["2580"].exists)
+    }
+
     func testSharedDraftIsNotUploadedUntilVerify() {
         let app = launch("shareDraft")
         XCTAssertTrue(app.staticTexts["Nothing is sent until you tap Verify."].waitForExistence(timeout: 5))

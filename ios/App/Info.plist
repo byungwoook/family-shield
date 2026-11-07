@@ -33,6 +33,8 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Family Shield uses Face ID to confirm it is you before you answer, show a call code, or change your check code. The device passcode works if Face ID does not.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>

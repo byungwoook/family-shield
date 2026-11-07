@@ -32,14 +32,8 @@ struct RootView: View {
             CreateFamilyView(model: model, shareBanner: model.share == nil ? nil : CopyCatalog.text(.shareWaitingFamily, AppLocale.resolve()), onDiscardShare: model.discardShare)
         case .parent(let familyId, let familyName):
             ParentHost(app: model, familyId: familyId, familyName: familyName)
-        case .childPlaceholder:
-            MessageScreen(
-                title: CopyCatalog.text(.childPlaceholderTitle, AppLocale.resolve()),
-                message: CopyCatalog.text(.childPlaceholderBody, AppLocale.resolve()),
-                onSignOut: model.signOut,
-                shareBanner: model.share == nil ? nil : CopyCatalog.text(.shareNeedsParent, AppLocale.resolve()),
-                onDiscardShare: model.discardShare
-            )
+        case .child(let child):
+            ChildHost(app: model, child: child)
         case .membershipPending:
             MessageScreen(
                 title: CopyCatalog.text(.membershipPendingTitle, AppLocale.resolve()),

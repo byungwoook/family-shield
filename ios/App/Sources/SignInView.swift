@@ -122,6 +122,8 @@ struct CreateFamilyView: View {
     var shareBanner: String? = nil
     var onDiscardShare: () -> Void = {}
     @State private var name = ""
+    @State private var joining = false
+    @State private var secret = ""
     @State private var busy = false
     @State private var error: String?
 
@@ -144,6 +146,18 @@ struct CreateFamilyView: View {
                 ) {
                     Task { await create() }
                 }
+                Button(CopyCatalog.text(.haveInvite, AppLocale.resolve())) { joining.toggle() }
+                    .accessibilityIdentifier("have_invite")
+                if joining {
+                    Text(CopyCatalog.text(.inviteEntryBody, AppLocale.resolve()))
+                    TextField(CopyCatalog.text(.inviteEntryLabel, AppLocale.resolve()), text: $secret)
+                        .textFieldStyle(.roundedBorder)
+                        .textInputAutocapitalization(.characters)
+                        .accessibilityIdentifier("invite_secret")
+                    PrimaryButton(title: CopyCatalog.text(.inviteEntrySubmit, AppLocale.resolve()), identifier: "accept_invite", enabled: !busy) {
+                        Task { await acceptInvite() }
+                    }
+                }
                 Button(CopyCatalog.text(.actionSignOut, AppLocale.resolve()), action: model.signOut)
                     .accessibilityIdentifier("sign_out")
                 if let error { Banner(text: error) }
@@ -163,6 +177,24 @@ struct CreateFamilyView: View {
         do {
             let family = try await model.api.createFamily(name: String(trimmed.prefix(Limits.name)))
             model.familyCreated(family)
+        } catch let failure as APIError {
+            error = CopyCatalog.text(ErrorCopy.key(for: failure), AppLocale.resolve())
+        } catch {
+            self.error = CopyCatalog.text(.errorGeneric, AppLocale.resolve())
+        }
+        busy = false
+    }
+
+    private func acceptInvite() async {
+        guard ChildRules.inviteLooksValid(secret) else {
+            error = CopyCatalog.text(.errorInviteInvalid, AppLocale.resolve())
+            return
+        }
+        busy = true
+        error = nil
+        do {
+            _ = try await model.api.acceptInvite(secret: secret)
+            await model.reload()
         } catch let failure as APIError {
             error = CopyCatalog.text(ErrorCopy.key(for: failure), AppLocale.resolve())
         } catch {

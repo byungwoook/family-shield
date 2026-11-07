@@ -191,6 +191,42 @@ public final class APIClient: Sendable {
         try await get("v1", "cases", caseId)
     }
 
+    public func acceptInvite(secret: String) async throws -> InviteAccepted {
+        try await postJSON(["secret": ChildRules.normalizeInvite(secret)], "v1", "invites", "accept")
+    }
+
+    public func startOtp(phoneE164: String, channel: String, biometricOk: Bool) async throws -> OtpStarted {
+        let body = try JSONSerialization.data(withJSONObject: [
+            "phone_e164": phoneE164,
+            "channel": channel,
+            "biometric_ok": biometricOk,
+        ] as [String: Any], options: [.sortedKeys])
+        let data = try await send(method: "POST", parts: ["v1", "phones", "otp"], query: [:], body: body, contentType: "application/json; charset=utf-8", auth: true)
+        return try JSONCoding.decode(OtpStarted.self, from: data)
+    }
+
+    public func checkOtp(phoneE164: String, code: String) async throws -> OtpChecked {
+        try await postJSON(["phone_e164": phoneE164, "code": code], "v1", "phones", "otp", "check")
+    }
+
+    public func setCheckCode(_ code: String, biometricOk: Bool) async throws -> StatusBody {
+        let body = try JSONSerialization.data(withJSONObject: ["code": code, "biometric_ok": biometricOk] as [String: Any], options: [.sortedKeys])
+        let data = try await send(method: "POST", parts: ["v1", "me", "check-code"], query: [:], body: body, contentType: "application/json; charset=utf-8", auth: true)
+        return try JSONCoding.decode(StatusBody.self, from: data)
+    }
+
+    public func childCase(caseId: String) async throws -> ChildCase {
+        try await get("v1", "cases", caseId)
+    }
+
+    public func answerCase(caseId: String, answer: String) async throws -> ChildCase {
+        try await postJSON(["answer": answer], "v1", "cases", caseId, "answer")
+    }
+
+    public func callCode(caseId: String) async throws -> CallCode {
+        try await get("v1", "cases", caseId, "call-code")
+    }
+
     public func registerPushToken(token: String, env: String, locale: String) async throws -> PushRegistration {
         try await postJSON(
             ["provider": "apns", "token": token, "env": env, "locale": locale],
@@ -313,6 +349,16 @@ public enum ErrorCopy {
         case "unsupported_audio": return .errorUnsupportedAudio
         case "empty_audio": return .errorEmptyAudio
         case "length_required": return .errorLengthRequired
+        case "invite_invalid": return .errorInviteInvalid
+        case "invite_expired": return .errorInviteExpired
+        case "not_a_child": return .errorNotAChild
+        case "biometric_required": return .errorBiometricRequired
+        case "phone_already_set": return .errorPhoneAlreadySet
+        case "same_number": return .errorSameNumber
+        case "otp_wrong": return .errorOtpWrong
+        case "otp_expired": return .errorOtpExpired
+        case "invalid_code": return .errorInvalidCode
+        case "not_the_child": return .errorNotTheChild
         default: return status >= 500 ? .errorServer : .errorGeneric
         }
     }

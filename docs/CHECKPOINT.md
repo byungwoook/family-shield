@@ -1,15 +1,15 @@
 # 체크포인트: 어디까지 했고, 어떻게 이어가는지
 
-마지막 갱신: 2026-11-07. 백엔드 v1과 Android 부모·공유·자녀 앱(M12–M14)은 main에 병합돼 있다. 이 브랜치는 M10 iOS 공유 확장이고, M9 부모 화면 위에 쌓여 있다. 시뮬레이터, Face ID, APNs 기기 토큰은 아직 없다. 이 파일만 읽으면 바로 시작할 수 있게 쓴다.
+마지막 갱신: 2026-11-07. 백엔드 v1과 Android 부모·공유·자녀 앱(M12–M14)은 main에 병합돼 있다. 이 브랜치는 M11 iOS 자녀 화면(Face ID)이고, M10 공유 확장 위에 쌓여 있다. 시뮬레이터와 기기 확인, APNs 키는 아직 없다. 이 파일만 읽으면 바로 시작할 수 있게 쓴다.
 설계의 권위는 [PRODUCT_REDESIGN.md](PRODUCT_REDESIGN.md), API의 권위는 코드와 그것을 옮긴 [API_CONTRACT.md](API_CONTRACT.md)다.
 
 ## 1. 한 줄 요약
 
-백엔드는 v1 범위(M1–M8, M15, M16)가 main에 병합됐다. Android 부모 앱(M12), 공유 인텐트(M13), 자녀 화면(M14)도 main에 있다. M9 iOS 부모 화면은 아래 브랜치에 있다. 이 브랜치는 거기에 M10 공유 확장을 더한다. 오디오와 글을 App Group에 복사하고, 확인을 눌러야 multipart로 올린다. 10MB를 넘으면 폰에서 거절한다. `swift test`는 **27 passed**. 백엔드 경로는 추가하지 않았다. 백엔드는 `PGTZ=UTC`로 **682 passed, 1 skipped**(이 환경에는 Postgres가 없어 이번 커밋에서 pytest를 다시 돌리지는 못했다. 백엔드 파일은 그대로다). Xcode 시뮬레이터, Face ID, APNs 기기 토큰은 남아 있다.
+백엔드는 v1 범위(M1–M8, M15, M16)가 main에 병합됐다. Android 부모 앱(M12), 공유 인텐트(M13), 자녀 화면(M14)도 main에 있다. M9·M10은 아래 브랜치에 있다. 이 브랜치는 거기에 M11 자녀 화면을 더한다. 초대 수락, +1/+82 번호와 문자 코드, 확인 번호 두 번, Face ID(기기 암호로 넘어감) 뒤 예/아니요, 통화 중 6자리, 확인 번호 재설정이다. 나중에(Not now)는 답을 올리지 않는다. 알림에는 예/아니요도 코드도 없다. `swift test`는 **33 passed**. 백엔드 경로는 추가하지 않았다. 백엔드는 `PGTZ=UTC`로 **682 passed, 1 skipped**(이 환경에는 Postgres가 없어 pytest를 다시 돌리지는 못했다. 백엔드 파일은 그대로다). Xcode 시뮬레이터와 Face ID 기기 확인, APNs 키는 남아 있다.
 
 ## 2. PR 스택 (포크 `byungwoook/family-shield`, 원본에는 PR 없음)
 
-#5~#15는 main에 병합됐다. M9(`cursor/m9-ios-parent-4516`, PR #16)는 main을 기준으로 한다. 이 브랜치(`cursor/m10-ios-share-4516`)는 그 M9 위에 M10만 더한다. GitHub에서는 베이스 브랜치를 M9로 둬서 diff가 M10만 보이게 한다.
+#5~#15는 main에 병합됐다. M9는 PR #16(`cursor/m9-ios-parent-4516`, base main). M10은 PR #17(`cursor/m10-ios-share-4516`, base M9). 이 브랜치(`cursor/m11-ios-child-4516`)는 M10 위에 M11만 더한다. GitHub는 Origin 스택을 지원하지 않아서, 각 PR의 베이스 브랜치로 쌓는다. diff는 그 마일스톤만 보인다.
 
 | PR | 브랜치 | 내용 | 상태 |
 |---|---|---|---|
@@ -18,7 +18,8 @@
 | #14 | `cursor/m13-android-share-4d8a` | M13 Android 공유 인텐트 | main에 병합. 에뮬레이터 파일 공유와 카카오톡 수동 확인은 남음 |
 | #15 | `cursor/m14-android-child-308a` | M14 Android 자녀 화면 | main에 병합. 에뮬레이터 생체 인증과 FCM 기기 토큰은 남음 |
 | #16 | `cursor/m9-ios-parent-4516` | M9 iOS 부모 화면 | main 기준. 시뮬레이터 수동 확인과 APNs 기기 토큰은 남음 |
-| — | `cursor/m10-ios-share-4516` | M10 iOS 공유 확장 | M9 위에 쌓음. 시뮬레이터 파일 공유와 카카오톡은 남음 |
+| #17 | `cursor/m10-ios-share-4516` | M10 iOS 공유 확장 | M9 위에 쌓음. 시뮬레이터 파일 공유와 카카오톡은 남음 |
+| — | `cursor/m11-ios-child-4516` | M11 iOS 자녀 화면 | M10 위에 쌓음. Face ID와 APNs 기기 토큰은 남음 |
 | — | `wip/m12-android-partial` | 컴파일된 적 없는 초안. **병합 금지, 참고만** | 보관 |
 
 `claude/m12-android-parent`에 들어간 것:
@@ -46,8 +47,8 @@
 | M13 Android 공유 인텐트 | main (PR #14). `audio/*`·`text/plain`·`application/ogg` 공유가 초안이 되고, 확인을 눌러야 multipart로 올라간다. 10MB(10 485 760바이트)는 폰에서 거절. 에뮬레이터에서 파일 앱으로 공유하는 확인과 카카오톡 수동 확인은 남음 |
 | M14 Android 자녀 화면 | main (PR #15). JVM 77 passed, 1 skipped. 에뮬레이터 생체 인증과 FCM 기기 토큰은 남음. 백엔드 경로는 추가하지 않음 |
 | M9 iOS 부모 화면 | PR #16. SwiftUI + XcodeGen. `swift test`는 M10에서 27로 늘었다. 시뮬레이터 UI 테스트와 Apple 로그인 기기 확인은 남음 |
-| M10 iOS 공유 확장 | **이 브랜치.** `public.audio`·글·Ogg. 확인 전에 업로드하지 않음. 10MB(10 485 760바이트)는 폰에서 거절. 시뮬레이터 파일 앱 공유와 카카오톡은 남음 |
-| M11 iOS 자녀 화면 | 시작 전. Face ID |
+| M10 iOS 공유 확장 | PR #17. `public.audio`·글·Ogg. 확인 전에 업로드하지 않음. 시뮬레이터 파일 앱 공유와 카카오톡은 남음 |
+| M11 iOS 자녀 화면 | **이 브랜치.** 초대·번호·OTP·확인 번호·Face ID 답변·통화 코드·재설정. `swift test` 33 passed. 기기 Face ID와 APNs 키는 남음. 백엔드 경로는 추가하지 않음 |
 | M17 발신 번호 표시(iOS/Android) | 시작 전 |
 | M18 해커톤 에이전트 코드 제거 | 마지막에. 앱 자녀 화면이 쓸 만해진 뒤 |
 | M19 Safe Wallet | v1 이후, 법률 검토 후 |
@@ -82,7 +83,7 @@
 ### 5.1 코드 받기
 ```bash
 git clone https://github.com/byungwoook/family-shield.git && cd family-shield
-git checkout cursor/m10-ios-share-4516   # M10. 베이스는 M9 (cursor/m9-ios-parent-4516)
+git checkout cursor/m11-ios-child-4516   # M11. 베이스는 M10 (cursor/m10-ios-share-4516)
 ```
 
 ### 5.2 백엔드 (Python 3.13, Postgres)
@@ -226,8 +227,30 @@ venv/bin/uvicorn --factory backend.api:boot --host 0.0.0.0 --port 8000
 - 공유 확장이 앱을 여는 주소는 `familyshield://share`다. iOS 17에서 공유 확장이 호스트를 직접 못 열면, 같은 응답자 사슬로 `openURL:`을 한 번 더 시도한다.
 - 그룹 컨테이너가 없으면 확장은 안내 문장을 보여주고 올리지 않는다.
 
-### 5.9 그다음
-1. iOS M11 자녀 화면(Face ID). 이 브랜치 위에 쌓는다.
-2. M17.
-3. 키가 필요한 수동 확인([MANUAL_CHECKS.md](MANUAL_CHECKS.md)).
-4. M18.
+### 5.9 M11에서 된 것과 남은 것
+된 것 (`ios/README.md`, 이 브랜치):
+- 가족이 없는 계정은 가족을 만들거나 초대 코드를 넣는다. `POST /v1/invites/accept`.
+- 자녀는 +1/+82 번호를 넣고 문자 코드(또는 전화 코드)를 확인한 뒤, 4자리 확인 번호를 두 번 넣어 저장한다. 처음 정할 때는 `biometric_ok: false`. 이미 번호가 있으면 `phone_already_set`으로 넘어가고, 이미 확인 번호가 있으면 `biometric_required`로 넘어가며 그 자리에서 바꾸지 않는다.
+- `active`인 멤버십은 번호 단계를 건너뛴다.
+- 예/아니요와 6자리 통화 코드, 확인 번호 재설정은 `LAContext`의 `deviceOwnerAuthentication` 성공 뒤에만 한다. Face ID가 안 되면 기기 암호로 넘어가서 자녀가 갇히지 않는다.
+- 나중에(Not now)는 `POST /v1/cases/{id}/answer`를 호출하지 않는다. 케이스는 열린 채로 남아서 90초 뒤 전화로 넘어갈 수 있다.
+- 6자리는 화면 메모리에만 있고, 숨기거나 통화가 `calling`을 벗어나면 지운다. 설정에는 불리언(번호 인증함, 확인 번호 있음)만 저장한다. 코드는 저장하지 않는다.
+- 알림은 서버 문장 그대로다. 예/아니요 액션을 등록하지 않는다. 페이로드에 코드가 있어도 탭 정보에는 `kind`와 `case_id`만 남긴다.
+- 재설정 JSON은 Face ID 성공 뒤에만 만들고, `biometric_ok: true`와 새 코드만 담는다. 이전 코드는 본문에 없다.
+- 테스트: 위 규칙. **33 passed**. 백엔드는 고치지 않았다. `docs/API_CONTRACT.md`도 그대로다.
+- `NSFaceIDUsageDescription`을 Info.plist에 넣었다. Python `plistlib`으로 확인했다.
+
+남은 것:
+- Mac의 시뮬레이터(Features > Face ID > Enrolled)와 실기기에서 질문에 답하고, 통화 중 6자리를 보는 확인. [MANUAL_CHECKS.md](MANUAL_CHECKS.md) 11절. 이 환경에는 Xcode가 없다.
+- APNs 키(`.p8`), Key ID, 팀 ID. 자리표시자만 있다. 디버그는 `env=sandbox`, 릴리스는 `production`.
+- M9·M10에서 남은 시뮬레이터 수동 확인, 카카오톡, App Group을 개발자 계정에 만들기.
+
+소유자가 볼 결정:
+- Android 문구가 지문이라고 한 생체 안내를, iOS에서는 Face ID와 기기 암호로 바꿨다. 질문·결과·알림 문장은 Android와 같다.
+- 자녀 수신함 API는 추가하지 않았다. 질문 화면은 푸시의 `case_id`로 연다.
+- 재설치하면 번호 화면이 다시 나온다. 서버가 `phone_already_set` 또는 `biometric_required`를 주면 코드를 바꾸지 않고 다음 단계로 간다.
+
+### 5.10 그다음
+1. M17 발신 번호 표시.
+2. 키가 필요한 수동 확인([MANUAL_CHECKS.md](MANUAL_CHECKS.md)).
+3. M18.
