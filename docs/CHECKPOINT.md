@@ -1,15 +1,15 @@
 # 체크포인트: 어디까지 했고, 어떻게 이어가는지
 
-마지막 갱신: 2026-11-07. 백엔드 v1과 Android 부모·공유·자녀 앱(M12–M14)은 main에 병합돼 있다. 이 브랜치는 M9 iOS 부모 화면이다. 시뮬레이터, Face ID, 공유 확장, APNs 기기 토큰은 아직 없다. 이 파일만 읽으면 바로 시작할 수 있게 쓴다.
+마지막 갱신: 2026-11-07. 백엔드 v1과 Android 부모·공유·자녀 앱(M12–M14)은 main에 병합돼 있다. 이 브랜치는 M10 iOS 공유 확장이고, M9 부모 화면 위에 쌓여 있다. 시뮬레이터, Face ID, APNs 기기 토큰은 아직 없다. 이 파일만 읽으면 바로 시작할 수 있게 쓴다.
 설계의 권위는 [PRODUCT_REDESIGN.md](PRODUCT_REDESIGN.md), API의 권위는 코드와 그것을 옮긴 [API_CONTRACT.md](API_CONTRACT.md)다.
 
 ## 1. 한 줄 요약
 
-백엔드는 v1 범위(M1–M8, M15, M16)가 main에 병합됐다. Android 부모 앱(M12), 공유 인텐트(M13), 자녀 화면(M14)도 main에 있다. 이 브랜치는 M9 iOS 부모 화면이다. Apple 로그인(nonce), 가족 만들기, 초대 코드 한 번 표시, 가입 승인, 텍스트로 케이스 열기, 3초 폴링, 초록/빨강/노랑(en, ko). UIKit 없는 로직은 `ios/FamilyShieldCore`에서 `swift test`로 **18 passed**. 백엔드 경로는 추가하지 않았다. 백엔드는 `PGTZ=UTC`로 **682 passed, 1 skipped**. Xcode 시뮬레이터, Face ID, 공유 확장, APNs 기기 토큰은 남아 있다.
+백엔드는 v1 범위(M1–M8, M15, M16)가 main에 병합됐다. Android 부모 앱(M12), 공유 인텐트(M13), 자녀 화면(M14)도 main에 있다. M9 iOS 부모 화면은 아래 브랜치에 있다. 이 브랜치는 거기에 M10 공유 확장을 더한다. 오디오와 글을 App Group에 복사하고, 확인을 눌러야 multipart로 올린다. 10MB를 넘으면 폰에서 거절한다. `swift test`는 **27 passed**. 백엔드 경로는 추가하지 않았다. 백엔드는 `PGTZ=UTC`로 **682 passed, 1 skipped**(이 환경에는 Postgres가 없어 이번 커밋에서 pytest를 다시 돌리지는 못했다. 백엔드 파일은 그대로다). Xcode 시뮬레이터, Face ID, APNs 기기 토큰은 남아 있다.
 
 ## 2. PR 스택 (포크 `byungwoook/family-shield`, 원본에는 PR 없음)
 
-#5~#15는 main에 병합됐다. 이 브랜치(`cursor/m9-ios-parent-4516`)는 그 main에서 M9만 더한다.
+#5~#15는 main에 병합됐다. M9(`cursor/m9-ios-parent-4516`, PR #16)는 main을 기준으로 한다. 이 브랜치(`cursor/m10-ios-share-4516`)는 그 M9 위에 M10만 더한다. GitHub에서는 베이스 브랜치를 M9로 둬서 diff가 M10만 보이게 한다.
 
 | PR | 브랜치 | 내용 | 상태 |
 |---|---|---|---|
@@ -17,7 +17,8 @@
 | #13 | `claude/m12-android-parent` | M12 Android 부모 앱 | main에 병합. 에뮬레이터·FCM 기기 토큰은 여전히 수동 |
 | #14 | `cursor/m13-android-share-4d8a` | M13 Android 공유 인텐트 | main에 병합. 에뮬레이터 파일 공유와 카카오톡 수동 확인은 남음 |
 | #15 | `cursor/m14-android-child-308a` | M14 Android 자녀 화면 | main에 병합. 에뮬레이터 생체 인증과 FCM 기기 토큰은 남음 |
-| — | `cursor/m9-ios-parent-4516` | M9 iOS 부모 화면 | 이 브랜치. 시뮬레이터 수동 확인과 APNs 기기 토큰은 남음 |
+| #16 | `cursor/m9-ios-parent-4516` | M9 iOS 부모 화면 | main 기준. 시뮬레이터 수동 확인과 APNs 기기 토큰은 남음 |
+| — | `cursor/m10-ios-share-4516` | M10 iOS 공유 확장 | M9 위에 쌓음. 시뮬레이터 파일 공유와 카카오톡은 남음 |
 | — | `wip/m12-android-partial` | 컴파일된 적 없는 초안. **병합 금지, 참고만** | 보관 |
 
 `claude/m12-android-parent`에 들어간 것:
@@ -44,8 +45,9 @@
 | M12 Android 부모 화면 | main (PR #13). JVM 테스트와 DEV_AUTH 스모크 통과. 에뮬레이터 수동 확인과 FCM 기기 토큰은 남음 |
 | M13 Android 공유 인텐트 | main (PR #14). `audio/*`·`text/plain`·`application/ogg` 공유가 초안이 되고, 확인을 눌러야 multipart로 올라간다. 10MB(10 485 760바이트)는 폰에서 거절. 에뮬레이터에서 파일 앱으로 공유하는 확인과 카카오톡 수동 확인은 남음 |
 | M14 Android 자녀 화면 | main (PR #15). JVM 77 passed, 1 skipped. 에뮬레이터 생체 인증과 FCM 기기 토큰은 남음. 백엔드 경로는 추가하지 않음 |
-| M9 iOS 부모 화면 | **이 브랜치.** SwiftUI + XcodeGen `ios/project.yml`. `swift test` 18 passed. 시뮬레이터 UI 테스트와 Apple 로그인 기기 확인은 남음. 백엔드 경로는 추가하지 않음 |
-| M10–M11 iOS | 시작 전. 공유 확장은 M10, 자녀 화면(Face ID)은 M11 |
+| M9 iOS 부모 화면 | PR #16. SwiftUI + XcodeGen. `swift test`는 M10에서 27로 늘었다. 시뮬레이터 UI 테스트와 Apple 로그인 기기 확인은 남음 |
+| M10 iOS 공유 확장 | **이 브랜치.** `public.audio`·글·Ogg. 확인 전에 업로드하지 않음. 10MB(10 485 760바이트)는 폰에서 거절. 시뮬레이터 파일 앱 공유와 카카오톡은 남음 |
+| M11 iOS 자녀 화면 | 시작 전. Face ID |
 | M17 발신 번호 표시(iOS/Android) | 시작 전 |
 | M18 해커톤 에이전트 코드 제거 | 마지막에. 앱 자녀 화면이 쓸 만해진 뒤 |
 | M19 Safe Wallet | v1 이후, 법률 검토 후 |
@@ -80,7 +82,7 @@
 ### 5.1 코드 받기
 ```bash
 git clone https://github.com/byungwoook/family-shield.git && cd family-shield
-git checkout cursor/m9-ios-parent-4516   # M9. 베이스는 main (M12–M14 병합 후)
+git checkout cursor/m10-ios-share-4516   # M10. 베이스는 M9 (cursor/m9-ios-parent-4516)
 ```
 
 ### 5.2 백엔드 (Python 3.13, Postgres)
@@ -204,8 +206,28 @@ venv/bin/uvicorn --factory backend.api:boot --host 0.0.0.0 --port 8000
 - 초대 코드 복사는 로컬 클립보드에 60초만 둔다.
 - 시범 안내 문구는 Android가 Google이라고 쓴 자리에 Apple을 넣었다.
 
-### 5.8 그다음
-1. iOS M10 공유 확장, 그다음 M11 자녀 화면(Face ID). 이 브랜치 위에 쌓는다.
+### 5.8 M10에서 된 것과 남은 것
+된 것 (`ios/README.md`, 이 브랜치):
+- 공유 확장 `com.familyshield.app.share`. 활성화 규칙은 `public.audio`, `public.plain-text`, `org.xiph.ogg`다. 동영상과 일반 파일은 공유 시트에 넣지 않았다.
+- 파일은 App Group `group.com.familyshield.app`의 `share-drafts`에 복사되고, `familyshield://share`로 부모 앱의 초안이 열린다. 확인을 누르기 전에는 `POST /v1/cases`를 호출하지 않는다. 글만 있으면 JSON, 음성이 있으면 multipart이고 `Content-Length`가 있다.
+- 10MB를 넘거나 빈 파일은 복사 중에 끊고 올리지 않는다. 확장자는 Android와 같이 m4a, aac, ogg, opus, amr, caf를 오디오로 맞춘다. `.mp4`는 보낸 쪽이 이미 audio라고 한 경우만 받는다.
+- 로그인 전·가족 만들기 전·자녀 계정에는 대기 문구가 있고, 지우면 로컬 파일이 삭제된다.
+- 테스트: 형식 매핑, 10MB 한계, 스트리밍 복사가 한도를 넘기면 파일을 지움, 글 공유는 파일을 만들지 않음, multipart `Content-Length`. **27 passed**.
+- 백엔드는 고치지 않았다. `docs/API_CONTRACT.md`도 그대로다.
+- 공유 확장 Info.plist는 Python `plistlib`으로 읽었다. 활성화 규칙 문자열이 들어 있다.
+
+남은 것:
+- Mac에서 파일 앱으로 음성을 공유해 초안이 열리는지. [MANUAL_CHECKS.md](MANUAL_CHECKS.md) 10절. 이 환경에는 Xcode가 없다.
+- App Group은 개발자 계정에서 만들어야 한다. 자리표시자 `group.com.familyshield.app`.
+- 카카오톡이 받은 음성메시지를 다른 앱에 오디오로 넘기는지. 안 되면 파일 앱으로 공유하거나 글을 붙여 넣는다.
+- M9에서 남은 시뮬레이터 수동 확인, Apple 로그인, APNs.
+
+소유자가 볼 결정:
+- 공유 확장이 앱을 여는 주소는 `familyshield://share`다. iOS 17에서 공유 확장이 호스트를 직접 못 열면, 같은 응답자 사슬로 `openURL:`을 한 번 더 시도한다.
+- 그룹 컨테이너가 없으면 확장은 안내 문장을 보여주고 올리지 않는다.
+
+### 5.9 그다음
+1. iOS M11 자녀 화면(Face ID). 이 브랜치 위에 쌓는다.
 2. M17.
 3. 키가 필요한 수동 확인([MANUAL_CHECKS.md](MANUAL_CHECKS.md)).
 4. M18.

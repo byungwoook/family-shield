@@ -126,4 +126,18 @@ Then run the signed Debug app on that simulator against the local API (the debug
 - [ ] Switching the simulator language to Korean shows the Korean sentences
 - [ ] Release has no developer sign-in and no `127.0.0.1` default (`xcodebuild -configuration Release CODE_SIGNING_ALLOWED=NO build`, then search the built Info.plist)
 
-A physical device uses `FS_API_BASE=http://<mac-lan-ip>:8000` on the scheme. Sign in with Apple on that device needs the capability above. Face ID, the Share Extension, and a real APNs token are later sections.
+A physical device uses `FS_API_BASE=http://<mac-lan-ip>:8000` on the scheme. Sign in with Apple on that device needs the capability above. Face ID and a real APNs token are later sections.
+
+## 10. iOS Share Extension (milestone 10), needs a Mac
+
+Not a merge gate for KakaoTalk. Create the App Group `group.com.familyshield.app` on the Apple Developer account for both the app id `com.familyshield.app` and the extension id `com.familyshield.app.share`. The id is a placeholder until that group exists. No secret goes in the group.
+
+The same `xcodegen generate` and `xcodebuild ... test` as section 9. `ParentUITests/testSharedDraftIsNotUploadedUntilVerify` checks the draft copy. It does not upload.
+
+On the simulator, share a voice note from the Files app (an `.m4a` under 10 MB):
+
+- [ ] Family Shield appears on the share sheet for that audio file, and for plain text
+- [ ] The parent app opens a draft with the file attached. Nothing is uploaded until Verify
+- [ ] A file over 10 MB is refused on the phone and does not create a case
+- [ ] Pasted text still opens a draft with no audio
+- [ ] KakaoTalk: long-press a voice message someone else sent. If Family Shield is offered, share it and note the type. If it is not, save the file and share it from Files. Note the extension. This is open question 8, not a merge gate.

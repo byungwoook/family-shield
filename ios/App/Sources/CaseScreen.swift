@@ -120,7 +120,16 @@ struct UITestHost: View {
     var body: some View {
         let locale = AppLocale.resolve()
         let now = Times.parse("2026-11-07T12:00:00+00:00") ?? Date()
-        if let home = ParentFixtures.home(fixture, locale: locale, now: now) {
+        if fixture == .shareDraft {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(CopyCatalog.text(.newCaseNotSentYet, locale))
+                    .accessibilityIdentifier("not_sent_yet")
+                Text(CopyCatalog.text(.newCaseAudioAttached, locale, "voice.m4a", 1))
+                    .accessibilityIdentifier("draft_audio")
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        } else if let home = ParentFixtures.home(fixture, locale: locale, now: now) {
             FixtureHome(home: home)
         } else if let item = ParentFixtures.caseItem(fixture) {
             let view = CasePresenter.present(item, locale: locale, formattingLocale: .current)

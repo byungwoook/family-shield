@@ -35,6 +35,15 @@ final class ParentUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Warn your family"].exists)
     }
 
+    func testSharedDraftIsNotUploadedUntilVerify() {
+        let app = launch("shareDraft")
+        XCTAssertTrue(app.staticTexts["Nothing is sent until you tap Verify."].waitForExistence(timeout: 5))
+        let attached = app.staticTexts["draft_audio"]
+        XCTAssertTrue(attached.waitForExistence(timeout: 5))
+        XCTAssertTrue(attached.label.contains("voice.m4a"))
+        XCTAssertTrue(attached.label.contains("until you tap Verify"))
+    }
+
     func testRedResultInKorean() {
         let app = XCUIApplication()
         app.launchArguments = ["-AppleLanguages", "(ko)", "-AppleLocale", "ko_KR", "--ui-test", "red"]
