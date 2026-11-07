@@ -1,15 +1,15 @@
 # 체크포인트: 어디까지 했고, 어떻게 이어가는지
 
-마지막 갱신: 2026-11-07. 백엔드 v1, Android(M12–M14), iOS(M9–M11)는 main(`772e5d5`)에 있다. 이 브랜치는 M17 발신 번호 표시다. 시뮬레이터·에뮬레이터·기기 확인은 아직 없다. 이 파일만 읽으면 바로 시작할 수 있게 쓴다.
+마지막 갱신: 2026-11-07. 백엔드 v1, Android(M12–M14), iOS(M9–M11)는 main(`772e5d5`)에 있다. M17 발신 번호 표시는 PR #19다. 이 브랜치는 그 위에 쌓은 M18이고, 해커톤 에이전트 코드를 지운다. 시뮬레이터·에뮬레이터·기기 확인은 아직 없다. 이 파일만 읽으면 바로 시작할 수 있게 쓴다.
 설계의 권위는 [PRODUCT_REDESIGN.md](PRODUCT_REDESIGN.md), API의 권위는 코드와 그것을 옮긴 [API_CONTRACT.md](API_CONTRACT.md)다.
 
 ## 1. 한 줄 요약
 
-백엔드 v1, Android M12–M14, iOS M9–M11은 main에 있다. 이 브랜치는 M17이다. iOS Call Directory 확장과 Android `CallScreeningService`가 번호 하나만 "Family Shield"로 표시한다. 그 번호는 빌드 설정의 자리표시자 `+15555550100`이고, Twilio 계정이 아니다. 자녀 번호는 넣지 않는다. 발신 번호를 받아 "verified"를 돌려주는 경로는 없다. 켜는 것은 선택이고, 확인 번호는 이것 없이 동작한다. 백엔드 경로는 추가하지 않았다. `swift test`는 **39 passed**(이전 33에 6을 더함). Android `assembleDebug`, `assembleRelease`, `testDebugUnitTest`는 **86 passed, 1 skipped**(이전 77 passed, 1 skipped에 9를 더함). 백엔드는 `PGTZ=UTC`로 **682 passed, 1 skipped**. 릴리스 APK에 `10.0.2.2`와 개발자 로그인 문구는 없다. Xcode와 에뮬레이터 확인은 [MANUAL_CHECKS.md](MANUAL_CHECKS.md) 12절에 적어 두었다.
+백엔드 v1, Android M12–M14, iOS M9–M11은 main에 있다. M17(PR #19)은 번호 하나만 "Family Shield"로 표시한다. 이 브랜치는 M18이다. `agents/`, `shared/`(trust, uAgents 모델, cards), Moss, Apify, Supabase 클라이언트, `deliver_voice_message`, `cartesia_setup.py`, `claude_tools.py`, `data/scam_reports.json`을 지웠다. `shared/cards.py`의 문장은 이미 앱 문자열에 있어서 옮길 것이 없었다. `make check`는 `PGTZ=UTC pytest`다. README 앞부분은 제품이고, 해커톤 데모는 이 포크의 태그 `hackathon-demo`(커밋 `c81c9c9`, 에이전트가 남아 있는 마지막 커밋)를 가리킨다. 태그는 upstream에 푸시하지 않았다. 에이전트용 pytest는 원래 없어서 백엔드 수는 줄지 않았다. `PGTZ=UTC`로 **682 passed, 1 skipped**(건너뛴 1개는 안내 mp3가 아직 없는 테스트). `swift test` **39 passed**. Android는 **86 passed, 1 skipped**. Safe Wallet은 건드리지 않았다.
 
 ## 2. PR 스택 (포크 `byungwoook/family-shield`, 원본에는 PR 없음)
 
-#5~#18은 main에 병합됐다. 이 브랜치(`cursor/m17-label-outbound-number-1a55`)는 main 위에 M17만 더한다. GitHub는 Origin 스택을 지원하지 않아서, 각 PR의 베이스 브랜치로 쌓는다. diff는 그 마일스톤만 보인다.
+#5~#18은 main에 병합됐다. M17은 PR #19(`cursor/m17-label-outbound-number-1a55`, base main)다. 이 브랜치(`cursor/m18-remove-agent-stack-1a55`)는 M17 위에 M18만 더한다. GitHub는 Origin 스택을 지원하지 않아서, PR의 베이스 브랜치를 M17 브랜치로 둔다. diff는 M18만 보인다.
 
 | PR | 브랜치 | 내용 | 상태 |
 |---|---|---|---|
@@ -21,6 +21,7 @@
 | #17 | `cursor/m10-ios-share-4516` | M10 iOS 공유 확장 | main에 병합. 시뮬레이터 파일 공유와 카카오톡은 남음 |
 | #18 | `cursor/m11-ios-child-4516` | M11 iOS 자녀 화면 | main에 병합. Face ID와 APNs 기기 토큰은 남음 |
 | #19 | `cursor/m17-label-outbound-number-1a55` | M17 발신 번호 표시 | main 기준. 기기에서 확장·역할을 켜는 확인은 남음 |
+| #20 | `cursor/m18-remove-agent-stack-1a55` | M18 에이전트 스택 제거 | M17 위에 쌓음. 태그 `hackathon-demo` |
 | — | `wip/m12-android-partial` | 컴파일된 적 없는 초안. **병합 금지, 참고만** | 보관 |
 
 `claude/m12-android-parent`에 들어간 것:
@@ -50,8 +51,8 @@
 | M9 iOS 부모 화면 | main (PR #16). 시뮬레이터 UI 테스트와 Apple 로그인 기기 확인은 남음 |
 | M10 iOS 공유 확장 | main (PR #17). 시뮬레이터 파일 앱 공유와 카카오톡은 남음 |
 | M11 iOS 자녀 화면 | main (PR #18). `swift test`는 그때 33. 기기 Face ID와 APNs 키는 남음 |
-| M17 발신 번호 표시(iOS/Android) | **이 브랜치, PR #19.** 번호 하나만 "Family Shield". 자리표시자 `+15555550100`. 백엔드 경로 없음. `swift test` 39. Android 86 passed, 1 skipped. 기기 확인은 남음 |
-| M18 해커톤 에이전트 코드 제거 | 마지막에. 앱 자녀 화면이 쓸 만해진 뒤 |
+| M17 발신 번호 표시(iOS/Android) | PR #19. 번호 하나만 "Family Shield". 자리표시자 `+15555550100`. 백엔드 경로 없음. `swift test` 39. Android 86 passed, 1 skipped. 기기 확인은 남음 |
+| M18 해커톤 에이전트 코드 제거 | **이 브랜치, PR #20.** 태그 `hackathon-demo` (`c81c9c9`). pytest는 682 passed, 1 skipped로 그대로다. Safe Wallet은 없음 |
 | M19 Safe Wallet | v1 이후, 법률 검토 후 |
 
 ## 4. 열린 항목
@@ -84,7 +85,8 @@
 ### 5.1 코드 받기
 ```bash
 git clone https://github.com/byungwoook/family-shield.git && cd family-shield
-git checkout cursor/m17-label-outbound-number-1a55   # M17. 베이스는 main
+git checkout cursor/m18-remove-agent-stack-1a55   # M18. 베이스는 M17 (cursor/m17-label-outbound-number-1a55)
+# 해커톤 데모: git checkout hackathon-demo   # 이 포크의 태그. upstream에는 없다.
 ```
 
 ### 5.2 백엔드 (Python 3.13, Postgres)
@@ -253,11 +255,10 @@ venv/bin/uvicorn --factory backend.api:boot --host 0.0.0.0 --port 8000
 
 ### 5.10 그다음
 1. 키가 필요한 수동 확인([MANUAL_CHECKS.md](MANUAL_CHECKS.md), M17은 12절).
-2. M18 해커톤 에이전트 코드 제거. M17 브랜치 위에 쌓는다.
-3. M19 Safe Wallet은 시작하지 않는다.
+2. M19 Safe Wallet은 시작하지 않는다. v1이 쓰이고 법률 검토가 끝난 뒤에만.
 
 ### 5.11 M17에서 된 것과 남은 것
-된 것 (이 브랜치):
+된 것 (M17, PR #19):
 - iOS Call Directory 확장 `com.familyshield.app.calldirectory`. 식별 항목은 하나이고 라벨은 "Family Shield"다. 차단 항목은 없다. 번호는 `ios/project.yml`의 `FS_OUTBOUND_CALLER_ID`다. 기본값은 예약된 가상 번호 `+15555550100`이다.
 - Android `OutboundCallScreeningService`. `respondToCall`을 UI보다 먼저 호출하고, 모든 전화를 울리게 둔다. 설정된 번호에만 "Family Shield" 배너를 띄운다. 통화 음성은 읽지 않는다. `READ_CONTACTS`를 요청하지 않는다. 번호는 `-PfsOutboundCallerId`이고 기본값은 같은 자리표시자다.
 - 자녀 홈과 승인 대기 화면에 선택 항목이 있다. iOS는 시스템 전화 식별 설정을, Android 10 이상은 `ROLE_CALL_SCREENING` 요청을 연다. Android 9 이하는 버튼 대신 확인 번호가 그대로 쓴다는 문장을 보여 준다. 이 역할은 앱 하나만 가질 수 있다.
@@ -275,3 +276,24 @@ venv/bin/uvicorn --factory backend.api:boot --host 0.0.0.0 --port 8000
 - 기본 번호 `+15555550100`은 555-0100 대역의 가상 번호다. 운영 전화가 이 번호로 표시되려면 `-PfsOutboundCallerId`와 `FS_OUTBOUND_CALLER_ID`를 `TWILIO_FROM_NUMBER`로 맞춘다.
 - Android는 이 역할이 없는 다른 스크리닝 앱을 대체한다. 안내 문장에 그 사실을 적었다. 이미 연락처에 저장된 번호는 그 이름이 남는다. 연락처 권한을 받지 않기 때문이다.
 - 배너는 수신 화면을 가리지 않게 위쪽에 두고, 포커스를 가져가지 않는다. "Family Shield"와 가족을 대신해 전화한다는 문장만 있다.
+
+### 5.12 M18에서 된 것과 남은 것
+된 것 (이 브랜치):
+- 지운 것: `agents/`, `shared/trust.py`, `shared/messages.py`(uAgents 모델), `shared/cards.py`, `services/data_tools.py`(Moss와 Supabase), `services/scam_intel.py`(Apify), `services/claude_tools.py`, `services/cartesia_setup.py`, `deliver_voice_message`, `data/scam_reports.json`.
+- `shared/cards.py`를 import하던 제품 코드는 없었다. 결과 문장은 이미 Android `strings.xml`과 iOS `CopyCatalog`에 있다. 그래서 옮긴 파일은 없다.
+- `services/cartesia_tools.py`에는 `transcribe`와 `make_voice_message`만 남겼다. `services/code_webhook.py`의 `_digits`와 `make_app`은 테스트가 아직 쓴다. 제품 전화는 Twilio다.
+- `requirements.txt`에서 `uagents`, `uagents-core`, `moss`, `supabase`를 뺐다. 깨끗한 venv로 `PGTZ=UTC pytest`는 **682 passed, 1 skipped**. 에이전트 테스트 파일이 원래 없어서 수는 줄지 않았다. 건너뛴 1개는 `tests/test_calls.py`의 안내 mp3 12개가 아직 없는 경우다.
+- `make check`는 그 pytest다.
+- README 앞은 제품 설명이다. "Hackathon demo (archived)"는 태그 `hackathon-demo`를 가리킨다. 태그는 커밋 `c81c9c9`이고, 에이전트 코드가 들어 있는 마지막 커밋이다. `origin`(이 포크)에만 푸시했다.
+- `swift test` **39 passed**. Android `assembleDebug`, `assembleRelease`, `testDebugUnitTest` **86 passed, 1 skipped**. 앱 로직은 문구 주석만 고쳤다.
+- Safe Wallet 파일은 없다. 만들지 않았다.
+
+남은 것:
+- M9–M17의 시뮬레이터·에뮬레이터·기기 확인. [MANUAL_CHECKS.md](MANUAL_CHECKS.md).
+- 안내 mp3 12개. 없으면 운영 부팅이 거부되고, 그 테스트 1개는 계속 건너뛴다.
+
+소유자가 볼 결정:
+- 태그 이름은 `hackathon-demo`다. 다른 이름을 원하면 이 포크에서만 바꾸면 된다. upstream `khuzaymaa918/family-shield`에는 태그를 푸시하지 않았다.
+- `services/code_webhook.py`는 남겼다. 제품이 `_digits`를 쓰고, 테스트가 `make_app`으로 숫자 접기를 확인한다. 에이전트는 더 이상 이 웹훅을 부르지 않는다.
+- `services/claude_tools.py`도 지웠다. 에이전트와 `scam_intel`만 불렀고, 제품의 Claude 호출은 `backend/analysis.py`에 있다.
+- `docs/PRODUCT_REDESIGN.md`는 설계 기록이라 옛 파일 이름을 그대로 둔다. 새 독자는 README를 본다.

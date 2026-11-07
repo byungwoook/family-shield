@@ -1,10 +1,10 @@
-"""Cartesia functions. Owner: Teammate A (P2).
+"""Cartesia speech-to-text and text-to-speech for the product.
 
-Plain Python only: no agents here. The agents call these functions:
-    transcribe              voice note -> text (Cartesia speech-to-text), used by the Voice Inspector
-    deliver_voice_message   places the verification call (Cartesia agent), used by the Verifier
-    make_voice_message      the greeting as an mp3, for trying voices without placing a call
-What Cartesia does for us and its known limitations: services/CARTESIA.md.
+    transcribe           voice note -> text (ink-whisper)
+    make_voice_message   render one fixed prompt line to an mp3
+
+The live verification call does not use Cartesia. It plays the files
+`scripts/render_prompts.py` writes. See services/CARTESIA.md.
 """
 import os
 from pathlib import Path
@@ -85,61 +85,8 @@ def make_voice_message(
     return out_path
 
 
-def deliver_voice_message(phone: str, text: str = OUTREACH_SCRIPT, *, case_id: str) -> bool:
-    """Call the student, read `text`, and collect their check code from the keypad.
-
-    The call agent (set up once with `python -m services.cartesia_setup`) greets with `text`, sends the
-    digits the student types to the verify_code webhook (services/code_webhook.py) tagged with `case_id`,
-    and never reads the digits back. case_id is required so each code reaches the right case.
-    `phone` must be a US number in E.164 form, like +14155550123.
-
-    Blocking HTTP: from an async handler, call it as
-    `await asyncio.to_thread(deliver_voice_message, phone, case_id=case_id)`.
-
-    Returns True if Cartesia accepted the call (not that someone answered), False if the call couldn't be
-    placed. Raises only for setup mistakes: a missing API key or IDs in .env, or an empty case_id.
-    """
-    if not case_id:
-        raise ValueError("deliver_voice_message needs a case_id")
-    agent_id = os.getenv("CARTESIA_AGENT_ID")
-    from_number_id = os.getenv("CARTESIA_FROM_NUMBER_ID")
-    missing = [name for name, value in (("CARTESIA_AGENT_ID", agent_id), ("CARTESIA_FROM_NUMBER_ID", from_number_id)) if not value]
-    if missing:
-        raise RuntimeError(f"Set {', '.join(missing)} in .env (run python -m services.cartesia_setup to get them)")
-    try:
-        response = requests.post(
-            f"{CARTESIA_API}/agents/calls",
-            headers=_headers(),
-            json={
-                "agent_id": agent_id,
-                "from_number_id": from_number_id,
-                "ringing_timeout_seconds": 30,
-                "outbound_calls": [{"to_number": phone, "dynamic_variables": {"message": text, "case_id": case_id}}],
-            },
-            timeout=15,
-        )
-        if not response.ok:
-            # Cartesia explains 4xx errors in the body.
-            print(f"Cartesia call failed ({response.status_code}): {response.text[:300]}")
-            return False
-        # One entry per destination, in order. Each has either agent_call_id or error.
-        entry = response.json()["calls"][0]
-    except (requests.RequestException, ValueError, KeyError, IndexError) as error:
-        print(f"Cartesia call failed: {type(error).__name__}")
-        return False
-    if "error" in entry:
-        print(f"Cartesia rejected the call to {phone}: {entry['error']}")
-    return "agent_call_id" in entry
-
-
 if __name__ == "__main__":
-    import sys
-
-    # python -m services.cartesia_tools                  -> transcribe + make_voice_message
-    # python -m services.cartesia_tools +14155550123     -> also places a real call to that number
     note = SAMPLES_DIR / "note-1.mp3"
     if note.exists():
         print(transcribe(str(note)))
     print(make_voice_message())
-    if len(sys.argv) > 1:
-        print(deliver_voice_message(sys.argv[1], case_id="manual-test"))
