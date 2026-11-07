@@ -290,6 +290,8 @@ JSON, `/v1/...`. Errors are `{ "error": "some_stable_code" }`. Every family quer
 | POST | `/v1/auth/google` | public | Google ID token → session |
 | POST | `/v1/families` | parent session | Create a family |
 | POST | `/v1/families/{id}/children` | parent | Invite a child, returns the secret once |
+| GET | `/v1/families/{id}/members` | parent | Members for the parent screen: status, last4, `awaiting_confirm`. No hashes |
+| POST | `/v1/families/{id}/members/{memberId}/invite` | parent | Re-issue the secret while no child account has accepted it. The old secret stops working |
 | POST | `/v1/invites/accept` | child session | Body: invite secret |
 | POST | `/v1/phones/otp` | child | Start OTP for an E.164 number |
 | POST | `/v1/phones/otp/check` | child | Complete OTP, attach number to the invited membership |
