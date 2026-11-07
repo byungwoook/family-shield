@@ -99,6 +99,45 @@ final class APIClientTests: XCTestCase {
         }
     }
 
+    func testVoiceNoteSetsContentLengthAndIsNotSentUntilAsked() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let file = dir.appendingPathComponent("voice.m4a")
+        try Data([1, 2, 3, 4]).write(to: file)
+        let transport = ScriptedTransport { request in
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Length"), String(request.httpBody?.count ?? -1))
+            XCTAssertTrue(request.value(forHTTPHeaderField: "Content-Type")?.hasPrefix("multipart/form-data; boundary=") == true)
+            let body = String(data: request.httpBody ?? Data(), encoding: .utf8) ?? ""
+            XCTAssertTrue(body.contains("name=\"child_member_id\""))
+            XCTAssertTrue(body.contains("name=\"audio\""))
+            XCTAssertTrue(body.contains("filename=\"voice.m4a\""))
+            XCTAssertTrue(body.contains("Content-Type: audio/mp4"))
+            let json = #"{"id":"case-1","family_id":"f","child_member_id":"c","state":"waiting_push","color":"open","created_at":"2026-11-07T00:00:00+00:00","updated_at":"2026-11-07T00:00:00+00:00"}"#
+            return HTTPResponse(status: 201, body: Data(json.utf8))
+        }
+        let client = APIClient(baseURL: "http://127.0.0.1:8000", tokens: StaticToken("t"), transport: transport)
+        let opened = try await client.openCase(
+            childMemberId: "c",
+            text: "caption",
+            audio: CaseAudio(fileURL: file, uploadName: "voice.m4a", contentType: "audio/mp4")
+        )
+        XCTAssertEqual(opened.id, "case-1")
+        let tooBig = dir.appendingPathComponent("big.m4a")
+        try Data(count: Int(VoiceNotes.maxBytes) + 1).write(to: tooBig)
+        let refusing = APIClient(baseURL: "http://127.0.0.1:8000", tokens: StaticToken("t"), transport: ScriptedTransport { _ in
+            XCTFail("oversized audio must not be uploaded")
+            return HTTPResponse(status: 500, body: Data())
+        })
+        do {
+            _ = try await refusing.openCase(childMemberId: "c", text: "", audio: CaseAudio(fileURL: tooBig, uploadName: "big.m4a", contentType: "audio/mp4"))
+            XCTFail("expected too large")
+        } catch let error as APIError {
+            XCTAssertEqual(error, .http(status: 413, code: "audio_too_large"))
+        } catch {
+            XCTFail("unexpected \(error)")
+        }
+    }
+
     func testPushTokenBodyUsesApnsSandbox() async throws {
         let transport = ScriptedTransport { request in
             let body = try JSONSerialization.jsonObject(with: request.httpBody ?? Data()) as? [String: String]

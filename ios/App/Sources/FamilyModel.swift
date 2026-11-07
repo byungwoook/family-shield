@@ -2,6 +2,13 @@ import FamilyShieldCore
 import Foundation
 import Observation
 
+struct DraftAudio: Equatable {
+    var fileURL: URL
+    var displayName: String
+    var contentType: String
+    var sizeBytes: Int64
+}
+
 struct ShownInvite: Equatable {
     var name: String
     var secret: String
@@ -33,6 +40,9 @@ final class FamilyModel {
     var page: Page = .home
     var caseChildId: String?
     var caseText = ""
+    var draft: DraftAudio?
+    var fromShare = false
+    private var appliedShareKey: String?
 
     init(familyId: String, familyName: String, api: APIClient) {
         self.familyId = familyId
@@ -155,6 +165,7 @@ final class FamilyModel {
     func rejectPhone(memberId: String) async { await decidePhone(memberId, .reject) }
 
     func openNewCase(preselect: String? = nil) {
+        removeDraft()
         let ready = members.filter(MemberRules.canVerify)
         page = .newCase
         caseChildId = preselect ?? (ready.count == 1 ? ready[0].id : nil)
@@ -163,9 +174,42 @@ final class FamilyModel {
     }
 
     func closeNewCase() {
+        removeDraft()
+        fromShare = false
         page = .home
         caseText = ""
         error = nil
+    }
+
+    /// A share becomes a draft. The file stays on this phone until Verify.
+    func applyShare(text: String, audio: DraftAudio?, problem: ShareProblem?, key: String) {
+        guard key != appliedShareKey else { return }
+        appliedShareKey = key
+        removeDraft()
+        let ready = members.filter(MemberRules.canVerify)
+        page = .newCase
+        caseChildId = ready.count == 1 ? ready[0].id : caseChildId
+        caseText = String(text.prefix(Limits.text))
+        draft = audio
+        fromShare = true
+        error = problem.map(Self.problemText)
+    }
+
+    func removeDraft() {
+        if let url = draft?.fileURL {
+            try? FileManager.default.removeItem(at: url)
+        }
+        draft = nil
+    }
+
+    static func problemText(_ problem: ShareProblem) -> String {
+        let key: CopyKey = switch problem {
+        case .tooLarge: .shareAudioTooLarge
+        case .empty: .shareAudioEmpty
+        case .unsupported: .shareAudioUnsupported
+        case .unreadable: .shareAudioUnreadable
+        }
+        return CopyCatalog.text(key, AppLocale.resolve())
     }
 
     func loadCase(_ id: String) async -> ParentCase? {
@@ -190,7 +234,12 @@ final class FamilyModel {
         busy = true
         error = nil
         do {
-            let opened = try await api.openCase(childMemberId: childId, text: String(caseText.prefix(Limits.text)).trimmingCharacters(in: .whitespacesAndNewlines))
+            let text = String(caseText.prefix(Limits.text)).trimmingCharacters(in: .whitespacesAndNewlines)
+            let audio = draft.map {
+                CaseAudio(fileURL: $0.fileURL, uploadName: $0.displayName, contentType: $0.contentType)
+            }
+            let opened = try await api.openCase(childMemberId: childId, text: text, audio: audio)
+            removeDraft()
             busy = false
             page = .home
             caseText = ""

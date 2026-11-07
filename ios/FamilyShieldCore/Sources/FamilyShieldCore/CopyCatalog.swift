@@ -195,6 +195,20 @@ public enum CopyKey: String, CaseIterable, Sendable {
     case errorAppleFailed = "error_apple_failed"
     case childPlaceholderTitle = "child_placeholder_title"
     case childPlaceholderBody = "child_placeholder_body"
+    case newCaseAudioAttached = "new_case_audio_attached"
+    case newCaseAudioRemove = "new_case_audio_remove"
+    case shareAudioTooLarge = "share_audio_too_large"
+    case shareAudioEmpty = "share_audio_empty"
+    case shareAudioUnsupported = "share_audio_unsupported"
+    case shareAudioUnreadable = "share_audio_unreadable"
+    case shareWaitingSignin = "share_waiting_signin"
+    case shareWaitingFamily = "share_waiting_family"
+    case shareNeedsParent = "share_needs_parent"
+    case shareDiscard = "share_discard"
+    case errorAudioTooLarge = "error_audio_too_large"
+    case errorUnsupportedAudio = "error_unsupported_audio"
+    case errorEmptyAudio = "error_empty_audio"
+    case errorLengthRequired = "error_length_required"
 }
 
 public enum AppLocale: String, Sendable, Equatable {
@@ -982,6 +996,62 @@ public enum CopyCatalog {
         .childPlaceholderBody: [
             .en: "The child screens are not in this version of the iOS app yet. Sign out, and use the invite on the child update when it is installed.",
             .ko: "이 iOS 버전에는 아직 자녀 화면이 없어요. 로그아웃한 뒤, 자녀 화면이 들어간 버전에서 초대 코드를 사용하세요.",
+        ],
+        .newCaseAudioAttached: [
+            .en: "Voice note attached: %1$s (%2$d KB). It stays on this phone until you tap Verify.",
+            .ko: "음성 메시지가 첨부됐어요: %1$s (%2$d KB). 확인하기를 누르기 전에는 이 휴대폰에만 있어요.",
+        ],
+        .newCaseAudioRemove: [
+            .en: "Remove voice note",
+            .ko: "음성 메시지 빼기",
+        ],
+        .shareAudioTooLarge: [
+            .en: "That voice note is over 10 MB, so it wasn't attached. You can paste the message instead.",
+            .ko: "음성 메시지가 10MB를 넘어서 첨부하지 않았어요. 받은 내용을 글로 붙여 넣을 수 있어요.",
+        ],
+        .shareAudioEmpty: [
+            .en: "That voice note was empty, so it wasn't attached.",
+            .ko: "음성 메시지가 비어 있어서 첨부하지 않았어요.",
+        ],
+        .shareAudioUnsupported: [
+            .en: "Family Shield can't read that file as a voice note. You can paste the message instead.",
+            .ko: "이 파일은 음성 메시지로 읽을 수 없어요. 받은 내용을 글로 붙여 넣을 수 있어요.",
+        ],
+        .shareAudioUnreadable: [
+            .en: "That voice note couldn't be read. You can paste the message instead.",
+            .ko: "음성 메시지를 읽지 못했어요. 받은 내용을 글로 붙여 넣을 수 있어요.",
+        ],
+        .shareWaitingSignin: [
+            .en: "A message is waiting. Sign in as a parent. Nothing is sent until you tap Verify.",
+            .ko: "확인할 메시지가 대기 중이에요. 보호자로 로그인하세요. 확인하기를 누르기 전에는 아무것도 전송되지 않아요.",
+        ],
+        .shareWaitingFamily: [
+            .en: "A message is waiting. Create your family, then choose who to ask. Nothing is sent until you tap Verify.",
+            .ko: "확인할 메시지가 대기 중이에요. 가족을 만든 뒤 누구에게 물어볼지 고르세요. 확인하기를 누르기 전에는 아무것도 전송되지 않아요.",
+        ],
+        .shareNeedsParent: [
+            .en: "This account is a child, so it can't verify a message. Sign in as a parent. Nothing was sent.",
+            .ko: "이 계정은 자녀라서 메시지를 확인할 수 없어요. 보호자 계정으로 로그인해 주세요. 전송된 것은 없어요.",
+        ],
+        .shareDiscard: [
+            .en: "Discard",
+            .ko: "지우기",
+        ],
+        .errorAudioTooLarge: [
+            .en: "That voice note is over 10 MB. Try a shorter one, or paste the message.",
+            .ko: "음성 메시지가 10MB를 넘어요. 더 짧은 녹음을 보내거나 글로 붙여 넣으세요.",
+        ],
+        .errorUnsupportedAudio: [
+            .en: "That file isn't an audio voice note.",
+            .ko: "이 파일은 음성 파일이 아니에요.",
+        ],
+        .errorEmptyAudio: [
+            .en: "That voice note was empty.",
+            .ko: "음성 메시지가 비어 있어요.",
+        ],
+        .errorLengthRequired: [
+            .en: "The voice note couldn't be sent. Please try again.",
+            .ko: "음성 메시지를 보내지 못했어요. 다시 시도해 주세요.",
         ],
     ]
 }

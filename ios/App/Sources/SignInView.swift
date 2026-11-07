@@ -4,6 +4,8 @@ import SwiftUI
 
 struct SignInView: View {
     var model: AppModel
+    var shareBanner: String? = nil
+    var onDiscardShare: () -> Void = {}
     @State private var busy = false
     @State private var error: String?
     @State private var rawNonce: String?
@@ -14,6 +16,10 @@ struct SignInView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
+                if let shareBanner {
+                    Text(shareBanner).accessibilityIdentifier("share_waiting")
+                    Button(CopyCatalog.text(.shareDiscard, AppLocale.resolve()), action: onDiscardShare)
+                }
                 Text(CopyCatalog.text(.appName, AppLocale.resolve()))
                     .font(.largeTitle).bold()
                     .padding(.top, 24)
@@ -113,6 +119,8 @@ enum DevCopy {
 
 struct CreateFamilyView: View {
     var model: AppModel
+    var shareBanner: String? = nil
+    var onDiscardShare: () -> Void = {}
     @State private var name = ""
     @State private var busy = false
     @State private var error: String?
@@ -120,6 +128,10 @@ struct CreateFamilyView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
+                if let shareBanner {
+                    Text(shareBanner).accessibilityIdentifier("share_waiting")
+                    Button(CopyCatalog.text(.shareDiscard, AppLocale.resolve()), action: onDiscardShare)
+                }
                 Text(CopyCatalog.text(.createFamilyTitle, AppLocale.resolve())).font(.title2)
                 Text(CopyCatalog.text(.createFamilyBody, AppLocale.resolve()))
                 TextField(CopyCatalog.text(.createFamilyNameLabel, AppLocale.resolve()), text: $name)

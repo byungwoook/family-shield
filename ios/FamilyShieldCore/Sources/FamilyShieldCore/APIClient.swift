@@ -3,6 +3,38 @@ import Foundation
 import FoundationNetworking
 #endif
 
+/// A voice note already stored on the phone. Building this does not upload it.
+public struct CaseAudio: Sendable {
+    public var fileURL: URL
+    public var uploadName: String
+    public var contentType: String
+    public init(fileURL: URL, uploadName: String, contentType: String) {
+        self.fileURL = fileURL
+        self.uploadName = uploadName
+        self.contentType = contentType
+    }
+}
+
+enum Multipart {
+    static func body(fields: [String: String], fileField: String, fileName: String, contentType: String, file: Data) -> (Data, String) {
+        let boundary = "FamilyShield\(UUID().uuidString.replacingOccurrences(of: "-", with: ""))"
+        var data = Data()
+        func append(_ string: String) { data.append(Data(string.utf8)) }
+        for (key, value) in fields.sorted(by: { $0.key < $1.key }) {
+            append("--\(boundary)\r\n")
+            append("Content-Disposition: form-data; name=\"\(key)\"\r\n\r\n")
+            append(value)
+            append("\r\n")
+        }
+        append("--\(boundary)\r\n")
+        append("Content-Disposition: form-data; name=\"\(fileField)\"; filename=\"\(fileName)\"\r\n")
+        append("Content-Type: \(contentType)\r\n\r\n")
+        data.append(file)
+        append("\r\n--\(boundary)--\r\n")
+        return (data, boundary)
+    }
+}
+
 public enum APIError: Error, Equatable, Sendable {
     case notConfigured
     case network
@@ -126,13 +158,33 @@ public final class APIClient: Sendable {
         try await postEmpty("v1", "families", familyId, "members", memberId, "allow-link")
     }
 
-    /// Opens a case with typed text. A voice note is a later milestone; sharing
-    /// must not call this until the parent taps Verify.
-    public func openCase(childMemberId: String, text: String) async throws -> ParentCase {
-        try await postJSON(
-            ["child_member_id": childMemberId, "text": String(text.prefix(Limits.text))],
-            "v1", "cases"
+    /// Opens a case. With `audio`, the body is multipart and `Content-Length`
+    /// is set. Without it, the body stays JSON. Either way this runs only when
+    /// the parent taps Verify.
+    public func openCase(childMemberId: String, text: String, audio: CaseAudio? = nil) async throws -> ParentCase {
+        let clipped = String(text.prefix(Limits.text))
+        guard let audio else {
+            return try await postJSON(["child_member_id": childMemberId, "text": clipped], "v1", "cases")
+        }
+        try rejectUnusable(audio)
+        let file = try Data(contentsOf: audio.fileURL)
+        let (body, boundary) = Multipart.body(
+            fields: ["child_member_id": childMemberId, "text": clipped],
+            fileField: "audio",
+            fileName: VoiceNotes.uploadName(displayName: audio.uploadName, contentType: audio.contentType),
+            contentType: audio.contentType,
+            file: file
         )
+        let data = try await send(
+            method: "POST",
+            parts: ["v1", "cases"],
+            query: [:],
+            body: body,
+            contentType: "multipart/form-data; boundary=\(boundary)",
+            auth: true,
+            contentLength: body.count
+        )
+        return try JSONCoding.decode(ParentCase.self, from: data)
     }
 
     public func parentCase(caseId: String) async throws -> ParentCase {
@@ -164,13 +216,26 @@ public final class APIClient: Sendable {
         return try JSONCoding.decode(T.self, from: data)
     }
 
-    private func send(method: String, parts: [String], query: [String: String], body: Data?, contentType: String?, auth: Bool) async throws -> Data {
+    private func rejectUnusable(_ audio: CaseAudio) throws {
+        let type = audio.contentType.lowercased()
+        let audioType = try NSRegularExpression(pattern: "^audio/[a-z0-9.+-]+$")
+        let range = NSRange(type.startIndex..., in: type)
+        if audioType.firstMatch(in: type, range: range) == nil {
+            throw APIError.http(status: 415, code: "unsupported_audio")
+        }
+        let size = Int64((try? audio.fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? -1)
+        if size <= 0 { throw APIError.http(status: 400, code: "empty_audio") }
+        if size > VoiceNotes.maxBytes { throw APIError.http(status: 413, code: "audio_too_large") }
+    }
+
+    private func send(method: String, parts: [String], query: [String: String], body: Data?, contentType: String?, auth: Bool, contentLength: Int? = nil) async throws -> Data {
         guard let url = url(parts, query: query) else { throw APIError.notConfigured }
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.timeoutInterval = 30
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if let contentType { request.setValue(contentType, forHTTPHeaderField: "Content-Type") }
+        if let contentLength { request.setValue(String(contentLength), forHTTPHeaderField: "Content-Length") }
         request.httpBody = body
         let token = auth ? tokens.currentToken()?.trimmingCharacters(in: .whitespacesAndNewlines) : nil
         if auth {
@@ -244,6 +309,10 @@ public enum ErrorCopy {
         case "sms_failed": return .errorSmsFailed
         case "member_not_callable": return .errorMemberNotCallable
         case "rate_limited": return .errorRateLimited
+        case "audio_too_large": return .errorAudioTooLarge
+        case "unsupported_audio": return .errorUnsupportedAudio
+        case "empty_audio": return .errorEmptyAudio
+        case "length_required": return .errorLengthRequired
         default: return status >= 500 ? .errorServer : .errorGeneric
         }
     }

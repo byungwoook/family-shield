@@ -5,11 +5,16 @@ struct FamilyFlow: View {
     @Bindable var model: FamilyModel
     var onOpened: (ParentCase) -> Void
     var onSignOut: () -> Void
+    var onDiscardShare: () -> Void
 
     var body: some View {
         Group {
             if model.page == .newCase {
-                NewCaseView(model: model, onOpened: onOpened)
+                NewCaseView(model: model, onOpened: onOpened, onBack: {
+                    let shared = model.fromShare
+                    model.closeNewCase()
+                    if shared { onDiscardShare() }
+                })
             } else {
                 FamilyHomeView(model: model, onOpened: onOpened, onSignOut: onSignOut)
             }
@@ -181,17 +186,20 @@ struct ChildCard: View {
 struct NewCaseView: View {
     @Bindable var model: FamilyModel
     var onOpened: (ParentCase) -> Void
+    var onBack: () -> Void
     private var locale: AppLocale { AppLocale.resolve() }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 HStack {
-                    Button(CopyCatalog.text(.cdBack, locale)) { model.closeNewCase() }
+                    Button(CopyCatalog.text(.cdBack, locale), action: onBack)
                         .accessibilityIdentifier("back")
                     Text(CopyCatalog.text(.newCaseTitle, locale)).font(.title2)
                 }
-                Text(CopyCatalog.text(.newCaseNotSentYet, locale)).font(.footnote)
+                Text(CopyCatalog.text(.newCaseNotSentYet, locale))
+                    .font(.footnote)
+                    .accessibilityIdentifier("not_sent_yet")
                 Text(CopyCatalog.text(.newCaseChildHeading, locale)).font(.headline)
                 if model.readyChildren.isEmpty {
                     Text(CopyCatalog.text(.newCaseNoChildren, locale))
@@ -219,6 +227,14 @@ struct NewCaseView: View {
                     .accessibilityIdentifier("case_text")
                 Text(CopyCatalog.text(.newCaseCounter, locale, model.caseText.count, Limits.text))
                     .font(.footnote).foregroundStyle(.secondary)
+                if let audio = model.draft {
+                    let kilobytes = max(1, Int((audio.sizeBytes + 1023) / 1024))
+                    Text(CopyCatalog.text(.newCaseAudioAttached, locale, audio.displayName, kilobytes))
+                        .accessibilityIdentifier("draft_audio")
+                    Button(CopyCatalog.text(.newCaseAudioRemove, locale)) { model.removeDraft() }
+                        .disabled(model.busy)
+                        .accessibilityIdentifier("remove_audio")
+                }
                 Text(CopyCatalog.text(.newCaseExplain, locale))
                 if let error = model.error { Banner(text: error) }
                 PrimaryButton(

@@ -30,6 +30,8 @@ final class AppModel {
     let api: APIClient
     private var pushToken: String?
     private var started = false
+    var share: ShareMarker?
+    var shareDirectory: URL?
 
     init() {
         let session = KeychainTokenStore()
@@ -55,7 +57,20 @@ final class AppModel {
         guard !started else { return }
         started = true
         AppRuntime.shared.model = self
+        refreshShare()
         await reload()
+    }
+
+    func refreshShare() {
+        guard let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: AppGroupID.identifier) else { return }
+        let directory = container.appendingPathComponent("share-drafts", isDirectory: true)
+        shareDirectory = directory
+        share = ShareDrafts.readMarker(directory: directory)
+    }
+
+    func discardShare() {
+        if let shareDirectory { ShareDrafts.wipe(shareDirectory) }
+        share = nil
     }
 
     static func uiTestFixture() -> ParentFixture? {

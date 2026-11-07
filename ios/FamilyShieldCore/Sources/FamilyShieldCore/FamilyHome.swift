@@ -154,6 +154,7 @@ public enum ParentFixture: String, CaseIterable, Sendable {
     case verifyDisabled
     case yellow
     case red
+    case shareDraft
 }
 
 public enum ParentFixtures {
@@ -176,7 +177,7 @@ public enum ParentFixtures {
                 awaitingConfirm: true
             )
             return FamilyHomeBuilder.make(familyName: "Lee", members: [pending], recent: [], locale: locale, formattingLocale: Locale(identifier: "en_US"), now: now)
-        case .yellow, .red:
+        case .yellow, .red, .shareDraft:
             return nil
         }
     }
@@ -206,7 +207,7 @@ public enum ParentFixtures {
                 timeline: ["start", "push_answered_no"],
                 decidedAt: "2026-11-07T03:42:00+00:00"
             )
-        case .emptyFamily, .verifyDisabled:
+        case .emptyFamily, .verifyDisabled, .shareDraft:
             return nil
         }
     }
