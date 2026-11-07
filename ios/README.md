@@ -1,4 +1,4 @@
-# Family Shield iOS (milestones 9 and 10)
+# Family Shield iOS (milestones 9, 10, and 11)
 
 SwiftUI app. The parent flow matches the Android parent app and [docs/API_CONTRACT.md](../docs/API_CONTRACT.md). Logic that does not need UIKit lives in the `FamilyShieldCore` Swift package (Swift 6) so it can be tested with `swift test` on Linux. The app target stays in the Swift 5 language mode so the UIKit and AuthenticationServices calls build without extra concurrency annotations.
 
@@ -58,3 +58,9 @@ UI tests (`ParentUITests`) launch the app with `--ui-test` and cover an empty fa
 The Share Extension accepts audio (`public.audio`, including m4a) and plain text, plus Ogg (`org.xiph.ogg`). It copies the file into the App Group `group.com.familyshield.app` and opens `familyshield://share`. `POST /v1/cases` runs only when the parent taps Verify. Text stays JSON. A voice note is multipart with `Content-Length`. A file over 10 MB (10 485 760 bytes) or an empty file is refused on the phone and is not uploaded. The share sheet does not register for movies or generic data, so Family Shield is not offered for every file.
 
 KakaoTalk on a real phone is not a merge gate. The manual check is in [docs/MANUAL_CHECKS.md](../docs/MANUAL_CHECKS.md). If KakaoTalk will not share the voice note, the parent shares the saved file from Files, or pastes the text.
+
+## What the child app does (milestone 11)
+
+The same binary. A signed-in user with no family can create one or enter the parent's invite code (`POST /v1/invites/accept`). The child then enters a `+1` or `+82` number, the SMS code (or "call me with the code"), and a 4-digit check code twice. The first save sends `biometric_ok: false`. Replacing a code requires Face ID and sends `biometric_ok: true`. An `active` membership skips the phone step. Until the parent confirms, the child waits.
+
+The question opens from a push (`kind=money_request`, `case_id`). There is no child case list. Yes and No call `POST /v1/cases/{id}/answer` only after `LAContext` policy `deviceOwnerAuthentication` succeeds (Face ID, or the device passcode when Face ID is unavailable). Not now posts nothing, so the case stays open and the backend can fall through to the call. While the case is `calling`, the same check calls `GET /v1/cases/{id}/call-code` and shows the 6 digits. That value stays in memory until the child hides it or the case leaves `calling`. Preferences store two booleans per member (phone verified, check code set), never a code. The notification is the fixed sentence from the API contract: no Yes/No action and no code. `NSFaceIDUsageDescription` is set. The manual device steps are in [docs/MANUAL_CHECKS.md](../docs/MANUAL_CHECKS.md).

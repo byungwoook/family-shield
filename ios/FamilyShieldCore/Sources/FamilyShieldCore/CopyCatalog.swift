@@ -209,6 +209,76 @@ public enum CopyKey: String, CaseIterable, Sendable {
     case errorUnsupportedAudio = "error_unsupported_audio"
     case errorEmptyAudio = "error_empty_audio"
     case errorLengthRequired = "error_length_required"
+    case haveInvite = "have_invite"
+    case haveInviteHint = "have_invite_hint"
+    case inviteEntryTitle = "invite_entry_title"
+    case inviteEntryBody = "invite_entry_body"
+    case inviteEntryLabel = "invite_entry_label"
+    case inviteEntrySubmit = "invite_entry_submit"
+    case childPhoneTitle = "child_phone_title"
+    case childPhoneBody = "child_phone_body"
+    case childPhoneLabel = "child_phone_label"
+    case childPhoneSubmit = "child_phone_submit"
+    case childPhoneAlready = "child_phone_already"
+    case childOtpTitle = "child_otp_title"
+    case childOtpBody = "child_otp_body"
+    case childOtpBodyPlain = "child_otp_body_plain"
+    case childOtpLabel = "child_otp_label"
+    case childOtpSubmit = "child_otp_submit"
+    case childOtpVoice = "child_otp_voice"
+    case childOtpResend = "child_otp_resend"
+    case childCodeTitle = "child_code_title"
+    case childCodeBody = "child_code_body"
+    case childCodeLabel = "child_code_label"
+    case childCodeAgainLabel = "child_code_again_label"
+    case childCodeSubmit = "child_code_submit"
+    case childCodeMismatch = "child_code_mismatch"
+    case childWaitingTitle = "child_waiting_title"
+    case childWaitingBody = "child_waiting_body"
+    case childWaitingBodyNumber = "child_waiting_body_number"
+    case childWaitingRefresh = "child_waiting_refresh"
+    case childHomeIdle = "child_home_idle"
+    case childHomeWaiting = "child_home_waiting"
+    case childHomeAnswer = "child_home_answer"
+    case childHomeReset = "child_home_reset"
+    case childQuestion = "child_question"
+    case childQuestionHint = "child_question_hint"
+    case childYes = "child_yes"
+    case childNo = "child_no"
+    case childNotNow = "child_not_now"
+    case childReveal = "child_reveal"
+    case childRevealHint = "child_reveal_hint"
+    case childCodeShown = "child_code_shown"
+    case childHideCode = "child_hide_code"
+    case childFallbackStatic = "child_fallback_static"
+    case childResetTitle = "child_reset_title"
+    case childResetBody = "child_reset_body"
+    case childResetUnlock = "child_reset_unlock"
+    case childResetSubmit = "child_reset_submit"
+    case childResetDone = "child_reset_done"
+    case childCodeExists = "child_code_exists"
+    case childResultYes = "child_result_yes"
+    case childResultNo = "child_result_no"
+    case childResultClosed = "child_result_closed"
+    case childNotificationBody = "child_notification_body"
+    case childNotificationChannel = "child_notification_channel"
+    case biometricTitleAnswer = "biometric_title_answer"
+    case biometricTitleCode = "biometric_title_code"
+    case biometricTitleReset = "biometric_title_reset"
+    case biometricSubtitle = "biometric_subtitle"
+    case errorInviteInvalid = "error_invite_invalid"
+    case errorInviteExpired = "error_invite_expired"
+    case errorNotAChild = "error_not_a_child"
+    case errorBiometricRequired = "error_biometric_required"
+    case errorPhoneAlreadySet = "error_phone_already_set"
+    case errorSameNumber = "error_same_number"
+    case errorOtpWrong = "error_otp_wrong"
+    case errorOtpExpired = "error_otp_expired"
+    case errorInvalidCode = "error_invalid_code"
+    case errorNotTheChild = "error_not_the_child"
+    case errorOtpRateLimited = "error_otp_rate_limited"
+    case errorOtpUnavailable = "error_otp_unavailable"
+    case errorOtpSmsFailed = "error_otp_sms_failed"
 }
 
 public enum AppLocale: String, Sendable, Equatable {
@@ -1052,6 +1122,286 @@ public enum CopyCatalog {
         .errorLengthRequired: [
             .en: "The voice note couldn't be sent. Please try again.",
             .ko: "음성 메시지를 보내지 못했어요. 다시 시도해 주세요.",
+        ],
+        .haveInvite: [
+            .en: "I have an invite code",
+            .ko: "초대 코드가 있어요",
+        ],
+        .haveInviteHint: [
+            .en: "A parent sent you a one-time code. You'll join as their child.",
+            .ko: "보호자가 보낸 일회용 코드로 자녀로 참여해요.",
+        ],
+        .inviteEntryTitle: [
+            .en: "Join your family",
+            .ko: "가족에 참여",
+        ],
+        .inviteEntryBody: [
+            .en: "Enter the invite code your parent sent. This account is for you, not for a younger sibling.",
+            .ko: "보호자가 보낸 초대 코드를 입력하세요. 이 계정은 본인용이며, 어린 동생을 위한 계정이 아니에요.",
+        ],
+        .inviteEntryLabel: [
+            .en: "Invite code",
+            .ko: "초대 코드",
+        ],
+        .inviteEntrySubmit: [
+            .en: "Join",
+            .ko: "참여하기",
+        ],
+        .childPhoneTitle: [
+            .en: "Your mobile number",
+            .ko: "휴대폰 번호",
+        ],
+        .childPhoneBody: [
+            .en: "Family Shield texts a 6-digit code to prove this number is yours. Only +1 (US, Canada) and +82 (Korea). Your parent never sees your check code.",
+            .ko: "이 번호가 본인 것인지 확인하려고 6자리 코드를 문자로 보내요. +1(미국, 캐나다)과 +82(한국)만 사용할 수 있어요. 보호자는 확인 번호를 볼 수 없어요.",
+        ],
+        .childPhoneLabel: [
+            .en: "Mobile number, with country code",
+            .ko: "국가 번호가 포함된 휴대폰 번호",
+        ],
+        .childPhoneSubmit: [
+            .en: "Send the code",
+            .ko: "코드 보내기",
+        ],
+        .childPhoneAlready: [
+            .en: "This account already has a phone number.",
+            .ko: "이 계정에는 이미 전화번호가 있어요.",
+        ],
+        .childOtpTitle: [
+            .en: "Enter the text code",
+            .ko: "문자 코드 입력",
+        ],
+        .childOtpBody: [
+            .en: "We sent a 6-digit code to the number ending %1$s. It expires in 10 minutes.",
+            .ko: "끝이 %1$s인 번호로 6자리 코드를 보냈어요. 10분 동안 유효해요.",
+        ],
+        .childOtpBodyPlain: [
+            .en: "We sent a 6-digit code to your phone. It expires in 10 minutes.",
+            .ko: "휴대폰으로 6자리 코드를 보냈어요. 10분 동안 유효해요.",
+        ],
+        .childOtpLabel: [
+            .en: "6-digit code",
+            .ko: "6자리 코드",
+        ],
+        .childOtpSubmit: [
+            .en: "Verify number",
+            .ko: "번호 확인",
+        ],
+        .childOtpVoice: [
+            .en: "Call me with the code instead",
+            .ko: "전화로 코드 듣기",
+        ],
+        .childOtpResend: [
+            .en: "Send the text again",
+            .ko: "문자 다시 보내기",
+        ],
+        .childCodeTitle: [
+            .en: "Choose a check code",
+            .ko: "확인 번호 정하기",
+        ],
+        .childCodeBody: [
+            .en: "Pick 4 digits you'll remember and enter them twice. Your parent never sees them. If you forget them, you can set new ones after a fingerprint or face check.",
+            .ko: "기억할 4자리 숫자를 두 번 입력하세요. 보호자는 이 번호를 볼 수 없어요. 잊어버리면 지문이나 얼굴 확인 뒤에 새로 정할 수 있어요.",
+        ],
+        .childCodeLabel: [
+            .en: "4-digit check code",
+            .ko: "4자리 확인 번호",
+        ],
+        .childCodeAgainLabel: [
+            .en: "Enter it again",
+            .ko: "한 번 더 입력",
+        ],
+        .childCodeSubmit: [
+            .en: "Save check code",
+            .ko: "확인 번호 저장",
+        ],
+        .childCodeMismatch: [
+            .en: "Those don't match. Enter the same 4 digits twice.",
+            .ko: "두 번호가 달라요. 같은 4자리를 두 번 입력하세요.",
+        ],
+        .childWaitingTitle: [
+            .en: "Waiting for your parent",
+            .ko: "보호자의 승인을 기다리는 중",
+        ],
+        .childWaitingBody: [
+            .en: "Ask your parent to confirm you in Family Shield. Until they do, they can't start a check.",
+            .ko: "보호자에게 패밀리 쉴드에서 가입을 승인해 달라고 하세요. 승인 전에는 확인을 시작할 수 없어요.",
+        ],
+        .childWaitingBodyNumber: [
+            .en: "Ask your parent to confirm you in Family Shield. Your number ends in %1$s.",
+            .ko: "보호자에게 패밀리 쉴드에서 가입을 승인해 달라고 하세요. 번호 끝자리는 %1$s이에요.",
+        ],
+        .childWaitingRefresh: [
+            .en: "Check again",
+            .ko: "다시 확인",
+        ],
+        .childHomeIdle: [
+            .en: "No request right now. When your family asks Family Shield to check a message, you'll get a notification. The notification has no Yes or No button and no code. Open it, then confirm with your fingerprint or face to answer.",
+            .ko: "지금 확인 요청이 없어요. 가족이 메시지 확인을 요청하면 알림이 와요. 알림에는 예/아니요 버튼도, 코드도 없어요. 알림을 연 다음 지문이나 얼굴로 확인한 뒤 답하세요.",
+        ],
+        .childHomeWaiting: [
+            .en: "Your family is waiting for your answer.",
+            .ko: "가족이 답을 기다리고 있어요.",
+        ],
+        .childHomeAnswer: [
+            .en: "Answer",
+            .ko: "답하기",
+        ],
+        .childHomeReset: [
+            .en: "Set a new check code",
+            .ko: "확인 번호 새로 정하기",
+        ],
+        .childQuestion: [
+            .en: "Did you send your family a message asking for money?",
+            .ko: "가족에게 돈을 부탁하는 메시지를 보낸 적이 있나요?",
+        ],
+        .childQuestionHint: [
+            .en: "Only your answer changes the result. Not now leaves the check open, and your family may call you.",
+            .ko: "결과 색깔을 바꾸는 것은 본인의 답뿐이에요. 나중에를 누르면 확인은 열린 채로 남고, 가족이 전화할 수 있어요.",
+        ],
+        .childYes: [
+            .en: "Yes",
+            .ko: "예",
+        ],
+        .childNo: [
+            .en: "No",
+            .ko: "아니요",
+        ],
+        .childNotNow: [
+            .en: "Not now",
+            .ko: "나중에",
+        ],
+        .childReveal: [
+            .en: "Show the code for this call",
+            .ko: "이 통화의 코드 보기",
+        ],
+        .childRevealHint: [
+            .en: "Your family is calling. The 6-digit code stays hidden until you confirm with your fingerprint or face. It is not in the notification.",
+            .ko: "가족이 전화하고 있어요. 6자리 코드는 지문이나 얼굴로 확인하기 전에는 보이지 않아요. 알림에는 코드가 없어요.",
+        ],
+        .childCodeShown: [
+            .en: "Enter this code on the phone keypad, then press 1 for yes or 2 for no. It works once, for 5 minutes, and it is not saved on this phone.",
+            .ko: "키패드에 이 코드를 입력한 다음, 맞으면 1, 아니면 2를 누르세요. 이 코드는 한 번만, 5분 동안 쓸 수 있고, 이 휴대폰에 저장되지 않아요.",
+        ],
+        .childHideCode: [
+            .en: "Hide the code",
+            .ko: "코드 숨기기",
+        ],
+        .childFallbackStatic: [
+            .en: "This call wants your 4-digit check code. If it asked for 6 digits, press star, then enter your check code.",
+            .ko: "이 통화는 4자리 확인 번호를 물어봐요. 6자리를 물어보면 별표(*)를 누른 다음 확인 번호를 입력하세요.",
+        ],
+        .childResetTitle: [
+            .en: "New check code",
+            .ko: "새 확인 번호",
+        ],
+        .childResetBody: [
+            .en: "Confirm with your fingerprint or face first. Then enter a new 4-digit code twice. This replaces the old one.",
+            .ko: "먼저 지문이나 얼굴로 확인하세요. 그다음 새 4자리 번호를 두 번 입력하세요. 이전 번호는 바뀌어요.",
+        ],
+        .childResetUnlock: [
+            .en: "Confirm with Face ID",
+            .ko: "Face ID로 확인",
+        ],
+        .childResetSubmit: [
+            .en: "Save the new code",
+            .ko: "새 번호 저장",
+        ],
+        .childResetDone: [
+            .en: "Your check code was updated.",
+            .ko: "확인 번호를 바꿨어요.",
+        ],
+        .childCodeExists: [
+            .en: "This account already has a check code. Replacing it needs a fingerprint or face check.",
+            .ko: "이 계정에는 이미 확인 번호가 있어요. 바꾸려면 지문이나 얼굴 확인이 필요해요.",
+        ],
+        .childResultYes: [
+            .en: "You answered yes.",
+            .ko: "예라고 답했어요.",
+        ],
+        .childResultNo: [
+            .en: "You answered no.",
+            .ko: "아니요라고 답했어요.",
+        ],
+        .childResultClosed: [
+            .en: "This check ended without your answer.",
+            .ko: "답을 남기지 않은 채로 이 확인이 끝났어요.",
+        ],
+        .childNotificationBody: [
+            .en: "Family Shield needs you to confirm a request.",
+            .ko: "패밀리 쉴드에서 확인이 필요한 요청이 있어요.",
+        ],
+        .childNotificationChannel: [
+            .en: "Requests",
+            .ko: "확인 요청",
+        ],
+        .biometricTitleAnswer: [
+            .en: "Confirm it's you",
+            .ko: "본인 확인",
+        ],
+        .biometricTitleCode: [
+            .en: "Show the call code",
+            .ko: "통화 코드 보기",
+        ],
+        .biometricTitleReset: [
+            .en: "Change your check code",
+            .ko: "확인 번호 변경",
+        ],
+        .biometricSubtitle: [
+            .en: "Family Shield uses Face ID. The device passcode is there if Face ID isn't available, so a broken Face ID does not trap you.",
+            .ko: "패밀리 쉴드는 Face ID를 사용해요. Face ID를 쓸 수 없으면 기기 암호로 확인할 수 있어서, Face ID가 고장 나도 갇히지 않아요.",
+        ],
+        .errorInviteInvalid: [
+            .en: "That invite code isn't valid. Ask your parent for a new one.",
+            .ko: "초대 코드가 올바르지 않아요. 보호자에게 새 코드를 요청하세요.",
+        ],
+        .errorInviteExpired: [
+            .en: "That invite code has expired. Ask your parent to send a new one.",
+            .ko: "초대 코드가 만료됐어요. 보호자에게 새 코드를 요청하세요.",
+        ],
+        .errorNotAChild: [
+            .en: "This account isn't a child in a family.",
+            .ko: "이 계정은 가족의 자녀가 아니에요.",
+        ],
+        .errorBiometricRequired: [
+            .en: "Confirm with your fingerprint or face before changing the check code.",
+            .ko: "확인 번호를 바꾸기 전에 지문이나 얼굴로 확인하세요.",
+        ],
+        .errorPhoneAlreadySet: [
+            .en: "This account already has a phone number.",
+            .ko: "이 계정에는 이미 전화번호가 있어요.",
+        ],
+        .errorSameNumber: [
+            .en: "That's already your number.",
+            .ko: "이미 쓰고 있는 번호예요.",
+        ],
+        .errorOtpWrong: [
+            .en: "That code is wrong. Try again.",
+            .ko: "코드가 틀려요. 다시 입력하세요.",
+        ],
+        .errorOtpExpired: [
+            .en: "That code expired. Send a new one.",
+            .ko: "코드가 만료됐어요. 새로 받아 주세요.",
+        ],
+        .errorInvalidCode: [
+            .en: "Use exactly 4 digits.",
+            .ko: "숫자 4자리를 입력하세요.",
+        ],
+        .errorNotTheChild: [
+            .en: "Only the child can answer this check.",
+            .ko: "이 확인에는 자녀만 답할 수 있어요.",
+        ],
+        .errorOtpRateLimited: [
+            .en: "You've reached the limit of 5 text codes in 24 hours. Try again later.",
+            .ko: "24시간 동안 보낼 수 있는 문자 코드 5회를 모두 썼어요. 나중에 다시 시도하세요.",
+        ],
+        .errorOtpUnavailable: [
+            .en: "Text codes aren't available on this server right now.",
+            .ko: "이 서버에서는 지금 문자 코드를 보낼 수 없어요.",
+        ],
+        .errorOtpSmsFailed: [
+            .en: "The text didn't go through. Please try again.",
+            .ko: "문자가 전달되지 않았어요. 다시 시도해 주세요.",
         ],
     ]
 }

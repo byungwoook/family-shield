@@ -1,6 +1,7 @@
 import FamilyShieldCore
 import Foundation
 import Observation
+import UserNotifications
 
 @MainActor
 final class AppRuntime {
@@ -19,7 +20,7 @@ final class AppModel {
         case signedOut
         case needsFamily
         case parent(familyId: String, familyName: String)
-        case childPlaceholder
+        case child(ChildDestination)
         case membershipPending
         case failed(String)
     }
@@ -32,6 +33,7 @@ final class AppModel {
     private var started = false
     var share: ShareMarker?
     var shareDirectory: URL?
+    var childCaseId: String?
 
     init() {
         let session = KeychainTokenStore()
@@ -57,6 +59,7 @@ final class AppModel {
         guard !started else { return }
         started = true
         AppRuntime.shared.model = self
+        UNUserNotificationCenter.current().delegate = PushCenter.shared
         refreshShare()
         await reload()
     }
@@ -66,6 +69,11 @@ final class AppModel {
         let directory = container.appendingPathComponent("share-drafts", isDirectory: true)
         shareDirectory = directory
         share = ShareDrafts.readMarker(directory: directory)
+    }
+
+    func openChildCase(_ id: String) {
+        guard ChildRules.isCaseId(id) else { return }
+        childCaseId = id
     }
 
     func discardShare() {
@@ -159,8 +167,8 @@ final class AppModel {
             phase = .needsFamily
         case .parent(let familyId, let familyName):
             phase = .parent(familyId: familyId, familyName: familyName)
-        case .child:
-            phase = .childPlaceholder
+        case .child(let child):
+            phase = .child(child)
         case .membershipPending:
             phase = .membershipPending
         }

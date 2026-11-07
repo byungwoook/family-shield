@@ -17,6 +17,25 @@ final class PushAppDelegate: NSObject, UIApplicationDelegate {
     }
 }
 
+/// Shows the server's alert as-is. No Yes action, no No action, and no code.
+final class PushCenter: NSObject, UNUserNotificationCenterDelegate {
+    static let shared = PushCenter()
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
+        [.banner, .sound]
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+        var data: [String: String] = [:]
+        for (key, value) in response.notification.request.content.userInfo {
+            guard let key = key as? String, let value = value as? String else { continue }
+            data[key] = value
+        }
+        guard let info = PushAlert.tapInfo(data), let id = info["case_id"] else { return }
+        await MainActor.run { AppRuntime.shared.model?.openChildCase(id) }
+    }
+}
+
 @MainActor
 enum PushRegistration {
     static func requestAndRegister() {

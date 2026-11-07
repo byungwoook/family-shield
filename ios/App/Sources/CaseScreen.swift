@@ -120,7 +120,19 @@ struct UITestHost: View {
     var body: some View {
         let locale = AppLocale.resolve()
         let now = Times.parse("2026-11-07T12:00:00+00:00") ?? Date()
-        if fixture == .shareDraft {
+        if fixture == .notNow {
+            NotNowFixture()
+        } else if fixture == .resetLocked {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(CopyCatalog.text(.childResetBody, locale))
+                Text(CopyCatalog.text(.biometricSubtitle, locale))
+                Button(CopyCatalog.text(.childResetUnlock, locale)) {}
+                    .accessibilityIdentifier("reset_unlock")
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .accessibilityIdentifier("reset_locked")
+        } else if fixture == .shareDraft {
             VStack(alignment: .leading, spacing: 12) {
                 Text(CopyCatalog.text(.newCaseNotSentYet, locale))
                     .accessibilityIdentifier("not_sent_yet")
@@ -150,6 +162,27 @@ struct UITestHost: View {
             .background(Theme.background(view.color, scheme: scheme).opacity(0.35))
             .accessibilityIdentifier("case_screen")
         }
+    }
+}
+
+private struct NotNowFixture: View {
+    @State private var prompt = ChildPrompt(prompt: true, caseState: "waiting_push")
+    private var locale: AppLocale { AppLocale.resolve() }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if prompt.prompt {
+                Text(CopyCatalog.text(.childQuestion, locale)).accessibilityIdentifier("child_question")
+                Button(CopyCatalog.text(.childNotNow, locale)) {
+                    prompt = ChildDecisions.notNow(prompt).0
+                }
+                .accessibilityIdentifier("not_now")
+            } else {
+                Text(CopyCatalog.text(.childQuestionHint, locale)).accessibilityIdentifier("still_open")
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }
 

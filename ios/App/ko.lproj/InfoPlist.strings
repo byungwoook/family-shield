@@ -1,1 +1,2 @@
 CFBundleDisplayName = "패밀리 쉴드";
+NSFaceIDUsageDescription = "답하거나, 통화 코드를 보거나, 확인 번호를 바꾸기 전에 Face ID로 본인인지 확인합니다. Face ID를 쓸 수 없으면 기기 암호를 사용합니다.";
