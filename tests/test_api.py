@@ -26,7 +26,8 @@ Readings, where the milestone text allows more than one:
   while the case is still asking for a code is not a guess: the store
   would treat "1" as a static mismatch, and this layer does not hand it
   that digit. Spoken words are not answers.
-- The case JSON is the same allowlist for a parent and for the child.
+- The parent's case JSON is an allowlist. The child's session gets a
+  smaller one (`CHILD_CASE_KEYS`) with nothing from the suspicious message.
   Last4 only. No code, nonce, or hash. `color` is green, red, yellow, or
   open. `gather` is static, one_time, answer, or null.
 - Names are stripped and refused when blank or longer than 200 characters.
@@ -49,6 +50,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.api import (
+    CHILD_CASE_KEYS,
     SESSION_TTL,
     InvalidPhone,
     RecordingCallProvider,
@@ -667,6 +669,30 @@ def test_in_app_no_is_not_flipped_by_a_following_code(world):
     assert child_view.status_code == 200
     assert_absent(child_view.json(), code)
     assert phone not in got.text
+    assert list(child_view.json()) == list(CHILD_CASE_KEYS)
+    assert child_view.json()["kind"] == "money_request"
+    assert list(answer.json()) == list(CHILD_CASE_KEYS)
+
+
+def test_the_child_never_sees_the_suspicious_message(world):
+    client, clock, _provider, _conn = world
+    parent = login(client, "Parent")
+    child = login(client, "Minji", subject="child-view")
+    family_id = _family(client, parent["token"])
+    member_id = _child(client, parent["token"], family_id)
+    phone = next_phone()
+    assert _activate(client, parent["token"], member_id, phone, child["user_id"]).status_code == 201
+    clock.advance(timedelta(hours=24))
+    story = "Mom I was arrested, send $3000 in gift cards, don't tell Dad"
+    case_id = _open(client, parent["token"], member_id, story).json()["id"]
+    parent_view = client.get(f"/v1/cases/{case_id}", headers=auth(parent["token"])).json()
+    assert parent_view["parent_text"] == story
+    child_view = client.get(f"/v1/cases/{case_id}", headers=auth(child["token"]))
+    for leaked in (story, "gift cards", phone[-4:], "Kim"):
+        assert leaked not in child_view.text
+    for key in ("parent_text", "transcript", "claims", "pattern_id", "timeline",
+                "phone_last4", "family_id", "child_display_name"):
+        assert key not in child_view.json()
 
 
 def test_digit_five_after_a_right_code_is_yellow_no_answer(world):
@@ -901,9 +927,10 @@ def test_a_second_answer_does_not_move_the_case(world):
     assert first.json()["state"] == "scam"
     assert second.json()["state"] == "scam"
     assert second.json()["result"] == "not_sent"
-    assert second.json()["timeline"] == first.json()["timeline"]
+    assert second.json()["decided_at"] == first.json()["decided_at"]
+    assert second.json()["updated_at"] == first.json()["updated_at"]
     steps = conn.execute(
-        "SELECT step FROM case_events WHERE case_id = %s ORDER BY at ASC, id ASC",
+        "SELECT step FROM case_events WHERE case_id = %s ORDER BY seq ASC",
         (case_id,),
     ).fetchall()
     assert [step for (step,) in steps] == ["start", "push_answered_no"]

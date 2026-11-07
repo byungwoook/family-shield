@@ -156,8 +156,8 @@ TABLES = {
         "started_at",
         "ended_at",
     },
-    "case_events": {"id", "case_id", "at", "step"},
-    "family_events": {"id", "family_id", "at", "actor_user_id", "step"},
+    "case_events": {"id", "seq", "case_id", "at", "step"},
+    "family_events": {"id", "seq", "family_id", "at", "actor_user_id", "step"},
     "phone_otp": {
         "id",
         "member_id",
@@ -1822,3 +1822,22 @@ def _delete_user_graph(url: str) -> None:
         connection.commit()
     finally:
         connection.close()
+
+
+def test_timeline_keeps_insertion_order_when_events_share_a_timestamp(conn):
+    """Several events in one request share `now`. A random id must not reorder them."""
+    for _ in range(20):
+        ids = seed(conn, app=True)
+        apply_case(conn, ids["case"], "start", now=NOW)
+        apply_case(conn, ids["case"], "use_static_code", now=NOW)
+        apply_case(conn, ids["case"], "code_check_slow", now=NOW)
+        apply_case(conn, ids["case"], "code_accepted", now=NOW)
+        apply_case(conn, ids["case"], "answer_no", now=NOW)
+        view = load_case(conn, ids["case"], now=NOW)
+        assert view["events"] == [
+            "start",
+            "use_static_code",
+            "code_check_slow",
+            "code_accepted",
+            "answer_no",
+        ]

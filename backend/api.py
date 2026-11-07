@@ -28,8 +28,10 @@ nothing. Digits are never logged. `GET /v1/cases/{id}/call-code` shows
 the one-time code to the child's session only.
 
 `GET /v1/cases/{id}` is an allowlist. It has no code, no nonce, no hash,
-and no full phone number. `phone_last4` is the only phone fragment, for
-both the parent and the child. The call-code route is a later milestone.
+and no full phone number. `phone_last4` is the only phone fragment. The
+child's session gets a smaller allowlist (`child_case`): the state and the
+outcome of the fixed `money_request` question, and nothing that came from
+the suspicious message.
 """
 
 import hashlib
@@ -68,6 +70,7 @@ from backend.codes import (
 )
 from backend.enroll import (
     INVITE_TTL,
+    OTP_CHANNELS,
     OTP_MAX_ATTEMPTS,
     OTP_SENDS_PER_DAY,
     OTP_TTL,
@@ -224,6 +227,7 @@ class InviteAcceptIn(BaseModel):
 class OtpStartIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     phone_e164: str = Field(max_length=16)
+    channel: str = Field(default="sms", max_length=8)
 
 
 class OtpCheckIn(BaseModel):
@@ -353,6 +357,36 @@ def public_case(view: dict, *, child_name: str, phone_last4: str | None) -> dict
         "updated_at": _iso(view["updated_at"]),
         "decided_at": _iso(view["decided_at"]),
     }
+
+
+CHILD_CASE_KEYS = (
+    "id",
+    "child_member_id",
+    "kind",
+    "state",
+    "result",
+    "color",
+    "answered_via",
+    "code_channel",
+    "gather",
+    "deadline_at",
+    "created_at",
+    "updated_at",
+    "decided_at",
+)
+
+
+def child_case(body: dict) -> dict:
+    """What the child's session sees: whether a question is open, and the outcome.
+
+    The question is the fixed `money_request`. The parent's text, the
+    transcript, the claims, the pattern, the timeline, and the number are
+    left out: they come from the suspicious message, and the child answers
+    the same fixed question on every case, in the app or on the call.
+    """
+    view = {key: body.get(key) for key in CHILD_CASE_KEYS if key != "kind"}
+    view["kind"] = "money_request"
+    return {key: view[key] for key in CHILD_CASE_KEYS}
 
 
 def keypad_action(case: dict, raw: str) -> tuple[str, str]:
@@ -603,13 +637,15 @@ def create_app(
             raise APIError(401, "unauthorized")
         return found
 
-    def _present(conn, view: dict) -> dict:
+    def _present(conn, view: dict, role: str = "parent") -> dict:
         member = member_contact(conn, view["child_member_id"])
         phone = None if member is None else member.get("phone_e164")
         last4 = phone[-4:] if isinstance(phone, str) and len(phone) >= 4 else None
         name = member["display_name"] if member else ""
         body = public_case(view, child_name=name, phone_last4=last4)
         body["gather"] = gather_for(view)
+        if role == "child":
+            return child_case(body)
         return body
 
     def _visible(conn, user_id, view) -> str:
@@ -900,7 +936,7 @@ def create_app(
             return result
         payload, phone, code = result
         try:
-            otp_sender.send(phone, code)
+            otp_sender.send(phone, code, channel=body.channel)
         except Exception as exc:
             log.error("otp sender failed: %s", type(exc).__name__)
             return _fail(502, "sms_failed")
@@ -1044,6 +1080,8 @@ def create_app(
         now = _now()
         user = _user(conn, authorization)
         member = _enrolling_child(conn, user["user_id"])
+        if body.channel not in OTP_CHANNELS:
+            raise APIError(400, "invalid_body")
         if member["status"] != "invited" or member["phone_e164"] is not None:
             raise APIError(409, "phone_already_set")
         phone = body.phone_e164
@@ -1061,6 +1099,7 @@ def create_app(
         )
         payload = {
             "status": "sent",
+            "channel": body.channel,
             "phone_last4": phone[-4:],
             "expires_at": _iso(expires_at),
         }
@@ -1272,8 +1311,7 @@ def create_app(
     def _get_case(conn, authorization, case_id: str) -> dict:
         user = _user(conn, authorization)
         view = load_case(conn, _uuid(case_id), now=_now())
-        _visible(conn, user["user_id"], view)
-        return _present(conn, view)
+        return _present(conn, view, _visible(conn, user["user_id"], view))
 
     def _answer(conn, authorization, case_id: str, body: AnswerIn) -> dict:
         now = _now()
@@ -1286,19 +1324,19 @@ def create_app(
         if who != "child":
             raise APIError(403, "not_the_child")
         if view["state"] in _TERMINAL:
-            return _present(conn, view)
+            return _present(conn, view, "child")
         event = "push_answered_yes" if body.answer == "yes" else "push_answered_no"
         updated = apply_case(conn, case_uuid, event, now=now, rng=rng)
-        return _present(conn, updated)
+        return _present(conn, updated, "child")
 
     def _digits_route(conn, authorization, case_id: str, body: DigitsIn) -> dict:
         now = _now()
         user = _user(conn, authorization)
         case_uuid = _uuid(case_id)
         view = lock_case(conn, case_uuid, now=now)
-        _visible(conn, user["user_id"], view)
+        who = _visible(conn, user["user_id"], view)
         updated = apply_keypad(conn, case_uuid, body.digits, now=now, rng=rng)
-        return _present(conn, updated)
+        return _present(conn, updated, who)
 
     def _child_for_parent(conn, user_id, member_id: str) -> dict:
         member = member_contact(conn, _uuid(member_id))
