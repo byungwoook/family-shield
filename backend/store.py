@@ -998,7 +998,7 @@ def family_roster(conn, family_id: UUID) -> list:
         """
         SELECT id, role, display_name, status, user_id, phone_e164,
                phone_opted_in_at, confirmed_by_parent_at, code_set_at,
-               invite_expires_at
+               invite_expires_at, pending_phone_e164
         FROM family_members
         WHERE family_id = %s AND status <> 'removed'
         ORDER BY created_at ASC, id ASC
@@ -1016,6 +1016,9 @@ def family_roster(conn, family_id: UUID) -> list:
                 "status": row["status"],
                 "linked": row["user_id"] is not None,
                 "phone_last4": phone[-4:] if isinstance(phone, str) else None,
+                "pending_phone_last4": (
+                    row["pending_phone_e164"][-4:] if row["pending_phone_e164"] else None
+                ),
                 "phone_verified": row["phone_opted_in_at"] is not None,
                 "has_check_code": row["code_set_at"] is not None,
                 "awaiting_confirm": (
@@ -1191,6 +1194,162 @@ def expire_case(conn, case_id: UUID, *, now: datetime, rng=None) -> dict | None:
     event, step = _TIMED_EVENTS[row["state"]]
     view = apply_case(conn, case_id, event, now=now, rng=rng, step=step)
     return view if view["state"] != row["state"] else None
+
+
+CASES_PER_CHILD_PER_DAY = 5
+CASES_PER_PARENT_PER_DAY = 10
+_OPEN_STATES = ("opened", "waiting_push", "calling", "awaiting_answer")
+
+
+def recent_case_counts(conn, *, child_member_id: UUID, opened_by: UUID, now: datetime) -> dict:
+    """Cases opened in the rolling 24 hours: by this parent for this child, and
+    by this parent in all. The child cap is per parent, as the design doc
+    words it ("a parent may open at most 5 cases per child").
+
+    Every case counts, decided or not, answered or not: a call to nobody still
+    cost a call.
+    """
+    _require_aware(now, "now")
+    # Lock the child first so two opens for one child cannot both pass the cap.
+    _lock_member(conn, child_member_id)
+    row = _one(
+        conn,
+        """
+        SELECT
+            count(*) FILTER (WHERE child_member_id = %s) AS child,
+            count(*) AS parent
+        FROM cases
+        WHERE created_at > %s AND opened_by = %s
+        """,
+        (child_member_id, now - timedelta(hours=24), opened_by),
+    )
+    return {"child": row["child"], "parent": row["parent"]}
+
+
+def pending_phone(conn, member_id: UUID) -> dict | None:
+    return _one(
+        conn,
+        """
+        SELECT phone_e164, pending_phone_e164, pending_phone_set_at
+        FROM family_members WHERE id = %s
+        """,
+        (member_id,),
+    )
+
+
+def confirm_phone_change(conn, member_id: UUID, *, now: datetime, actor_user_id: UUID) -> dict:
+    """Parent confirm: the pending number becomes the dial target, in one transaction.
+
+    Every open case for this member ends `not_confirmed` / `timeout` with the
+    timeline step `phone_number_changed`, so a call in flight cannot land on a
+    half-moved member. `phone_current_since` restarts the 24-hour rule.
+    Returns the old and new numbers and the cancelled case ids.
+    """
+    _require_aware(now, "now")
+    member = _one(
+        conn,
+        """
+        SELECT id, family_id, role, status, phone_e164, pending_phone_e164, pending_phone_set_at
+        FROM family_members WHERE id = %s FOR UPDATE
+        """,
+        (member_id,),
+    )
+    if member is None or member["role"] != "child":
+        raise CaseNotFound(str(member_id))
+    if member["status"] != "active" or member["pending_phone_e164"] is None:
+        raise ValueError("no_pending_number")
+    new_phone = member["pending_phone_e164"]
+    _execute(conn, "SELECT pg_advisory_xact_lock(hashtext(%s)::bigint)", (new_phone,))
+    open_ids = [
+        row["id"]
+        for row in _all(
+            conn,
+            """
+            SELECT id FROM cases
+            WHERE child_member_id = %s AND state = ANY(%s)
+            ORDER BY created_at ASC, id ASC
+            FOR UPDATE
+            """,
+            (member_id, list(_OPEN_STATES)),
+        )
+    ]
+    for case_id in open_ids:
+        apply_case(conn, case_id, "cancel", now=now, step="phone_number_changed")
+    _execute(
+        conn,
+        """
+        UPDATE family_members
+        SET phone_e164 = pending_phone_e164,
+            phone_opted_in_at = pending_phone_set_at,
+            phone_current_since = %s,
+            pending_phone_e164 = NULL,
+            pending_phone_set_at = NULL
+        WHERE id = %s
+        """,
+        (now, member_id),
+    )
+    add_family_event(
+        conn, member["family_id"], now=now, actor_user_id=actor_user_id,
+        step="number_change_confirmed",
+    )
+    return {
+        "family_id": member["family_id"],
+        "old_phone": member["phone_e164"],
+        "new_phone": new_phone,
+        "cancelled": open_ids,
+    }
+
+
+def reject_phone_change(conn, member_id: UUID, *, now: datetime, actor_user_id: UUID) -> None:
+    """Parent reject: the pending number is dropped and the old one stays."""
+    _require_aware(now, "now")
+    member = _one(
+        conn,
+        "SELECT family_id, pending_phone_e164 FROM family_members WHERE id = %s FOR UPDATE",
+        (member_id,),
+    )
+    if member is None:
+        raise CaseNotFound(str(member_id))
+    if member["pending_phone_e164"] is None:
+        raise ValueError("no_pending_number")
+    _execute(
+        conn,
+        """
+        UPDATE family_members
+        SET pending_phone_e164 = NULL, pending_phone_set_at = NULL
+        WHERE id = %s
+        """,
+        (member_id,),
+    )
+    add_family_event(
+        conn, member["family_id"], now=now, actor_user_id=actor_user_id,
+        step="number_change_rejected",
+    )
+
+
+def family_push_targets(conn, family_id: UUID, *, role: str) -> list:
+    """Push targets of the active members with this role. No phone numbers."""
+    rows = _all(
+        conn,
+        """
+        SELECT m.push_provider, m.push_token, m.push_env, u.locale
+        FROM family_members AS m
+        LEFT JOIN users AS u ON u.id = m.user_id
+        WHERE m.family_id = %s AND m.role = %s AND m.status = 'active'
+          AND m.push_token IS NOT NULL
+        ORDER BY m.created_at ASC, m.id ASC
+        """,
+        (family_id, role),
+    )
+    return [
+        {
+            "provider": row["push_provider"],
+            "token": row["push_token"],
+            "env": row["push_env"],
+            "locale": row["locale"] or "en",
+        }
+        for row in rows
+    ]
 
 
 TEXT_RETENTION = timedelta(days=30)

@@ -457,11 +457,14 @@ def test_the_background_loop_runs_tick(world):
 # --- Token registration ---
 
 
-def test_token_registration_is_child_only_and_validated(world):
+def test_token_registration_needs_a_membership_and_is_validated(world):
     client = world["client"]
+    stranger = login(client, "Nobody")
+    assert register(client, stranger["token"]).status_code == 403
     parent = login(client, "Parent")
     _family(client, parent["token"])
-    assert register(client, parent["token"]).status_code == 403
+    # Milestone 15: a parent's device gets number-change notices.
+    assert register(client, parent["token"], device="parent-device").status_code == 200
     _parent, child, member_id, _phone = pushable_child(world)
     for bad in (
         {"provider": "apns", "env": None},

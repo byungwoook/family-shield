@@ -134,6 +134,19 @@ def otp_message(phone_e164: str, code: str) -> str:
     )
 
 
+def number_change_notice(phone_e164: str) -> str:
+    """SMS to the number being replaced. No code, no new number, no link."""
+    if sms_language(phone_e164) == "ko":
+        return (
+            "[패밀리 쉴드] 가족 계정에 등록된 이 전화번호를 바꾸는 요청이 있었습니다. "
+            "직접 요청하지 않았다면 앱을 열어 거절하거나 가족에게 알려 주세요."
+        )
+    return (
+        "Family Shield: the phone number for this family account is changing. "
+        "If you didn't ask for this, open the app and reject it, or tell your family."
+    )
+
+
 def otp_voice_twiml(phone_e164: str, code: str) -> str:
     """`<Say>` the six digits twice, in the number's language. Nothing else."""
     if not isinstance(code, str) or _SIX_DIGITS.fullmatch(code) is None:
@@ -161,6 +174,11 @@ class DevOtp:
     def __init__(self) -> None:
         self.sent: list[tuple[str, str]] = []
         self.channels: list[str] = []
+        self.notices: list[tuple[str, str]] = []
+
+    def notify(self, phone_e164: str, body: str) -> None:
+        self.notices.append((phone_e164, body))
+        log.info("dev notice to number ending %s", phone_e164[-4:])
 
     def send(self, phone_e164: str, code: str, channel: str = "sms") -> None:
         if channel not in OTP_CHANNELS:
@@ -242,6 +260,19 @@ class TwilioOtp:
             "Record": "false",
         }
         url = f"https://api.twilio.com/2010-04-01/Accounts/{self._sid}/Calls.json"
+        response = self._post(url, data=data, auth=(self._sid, self._token), timeout=10)
+        status = getattr(response, "status_code", None)
+        if not isinstance(status, int) or not 200 <= status < 300:
+            raise OtpSendFailed(f"twilio status {status}")
+
+    def notify(self, phone_e164: str, body: str) -> None:
+        """A plain notice SMS (milestone 15). Not an OTP and not a verification factor."""
+        data = {"To": phone_e164, "Body": body}
+        if self._service:
+            data["MessagingServiceSid"] = self._service
+        else:
+            data["From"] = self._from
+        url = f"https://api.twilio.com/2010-04-01/Accounts/{self._sid}/Messages.json"
         response = self._post(url, data=data, auth=(self._sid, self._token), timeout=10)
         status = getattr(response, "status_code", None)
         if not isinstance(status, int) or not 200 <= status < 300:

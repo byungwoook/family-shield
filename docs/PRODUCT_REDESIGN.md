@@ -297,7 +297,8 @@ JSON, `/v1/...`. Errors are `{ "error": "some_stable_code" }`. Every family quer
 | POST | `/v1/phones/otp/check` | child | Complete OTP, attach number to the invited membership |
 | POST | `/v1/me/check-code` | child | Set or replace the code (current session only) |
 | POST | `/v1/families/{id}/members/{memberId}/confirm` | parent | Confirm or reject a pending child |
-| POST | `/v1/me/push-token` | child | Register an APNs or FCM token |
+| POST | `/v1/me/push-token` | child or parent | Register an APNs or FCM token (a parent's device gets number-change notices) |
+| POST | `/v1/families/{id}/members/{memberId}/phone-change` | parent | Confirm or reject a child's pending number. The child starts it with `/v1/phones/otp` plus `biometric_ok` |
 | POST | `/v1/cases` | parent | Body: `child_member_id`, optional `text`, optional audio multipart. Child must be `active` and confirmed. |
 | GET | `/v1/cases/{id}` | parent in that family, or the child on that case | State, result, claims, pattern, timeline. No phone number in the parent payload beyond last4, and never a code. |
 | POST | `/v1/cases/{id}/answer` | the child member | Body: `{ "answer": "yes" \| "no" }`. Idempotent. |

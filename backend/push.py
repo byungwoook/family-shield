@@ -36,6 +36,19 @@ ALERT_BODY = {
     "en": "Family Shield needs you to confirm a request.",
     "ko": "패밀리 쉴드에서 확인이 필요한 요청이 있어요.",
 }
+# Milestone 15: a phone number in the family is changing, or has changed.
+# Sent to the parents and to the child's current device. No number in it.
+NOTICE_BODY = {
+    "number_change_requested": {
+        "en": "A phone number in your family is changing. Open the app to review it.",
+        "ko": "가족 중 한 명의 전화번호 변경 요청이 있어요. 앱에서 확인해 주세요.",
+    },
+    "number_change_confirmed": {
+        "en": "A phone number in your family was changed. Open the app to see it.",
+        "ko": "가족 중 한 명의 전화번호가 변경됐어요. 앱에서 확인해 주세요.",
+    },
+}
+KINDS = ("money_request", *NOTICE_BODY)
 APNS_HOSTS = {
     "production": "https://api.push.apple.com",
     "sandbox": "https://api.sandbox.push.apple.com",
@@ -48,27 +61,35 @@ _APNS_PERMANENT = frozenset(
 _FCM_PERMANENT = frozenset({"UNREGISTERED", "INVALID_ARGUMENT", "SENDER_ID_MISMATCH"})
 
 
-def alert_text(locale: str | None) -> tuple[str, str]:
+def alert_text(locale: str | None, kind: str = "money_request") -> tuple[str, str]:
     language = "ko" if locale == "ko" else "en"
-    return ALERT_TITLE[language], ALERT_BODY[language]
+    if kind == "money_request":
+        return ALERT_TITLE[language], ALERT_BODY[language]
+    return ALERT_TITLE[language], NOTICE_BODY[kind][language]
 
 
-def apns_payload(case_id, locale: str | None) -> dict:
-    title, body = alert_text(locale)
+def _data(kind: str, ref) -> dict:
+    if kind not in KINDS:
+        raise ValueError("unknown push kind")
+    key = "case_id" if kind == "money_request" else "family_id"
+    return {"kind": kind, key: str(ref)}
+
+
+def apns_payload(case_id, locale: str | None, kind: str = "money_request") -> dict:
+    title, body = alert_text(locale, kind)
     return {
         "aps": {"alert": {"title": title, "body": body}, "sound": "default"},
-        "kind": "money_request",
-        "case_id": str(case_id),
+        **_data(kind, case_id),
     }
 
 
-def fcm_message(token: str, case_id, locale: str | None) -> dict:
-    title, body = alert_text(locale)
+def fcm_message(token: str, case_id, locale: str | None, kind: str = "money_request") -> dict:
+    title, body = alert_text(locale, kind)
     return {
         "message": {
             "token": token,
             "notification": {"title": title, "body": body},
-            "data": {"kind": "money_request", "case_id": str(case_id)},
+            "data": _data(kind, case_id),
             "android": {"priority": "HIGH", "ttl": f"{PUSH_TTL_SECONDS}s"},
         }
     }
@@ -81,13 +102,13 @@ class RecordingPush:
         self.sent: list[dict] = []
         self.outcomes = list(outcomes or [])
 
-    def send(self, *, provider, token, env, locale, case_id) -> str:
+    def send(self, *, provider, token, env, locale, case_id, kind="money_request") -> str:
         if provider == "apns":
-            payload = apns_payload(case_id, locale)
+            payload = apns_payload(case_id, locale, kind)
         else:
-            payload = fcm_message(token, case_id, locale)
+            payload = fcm_message(token, case_id, locale, kind)
         self.sent.append(
-            {"provider": provider, "token": token, "env": env, "payload": payload}
+            {"provider": provider, "token": token, "env": env, "payload": payload, "kind": kind}
         )
         return self.outcomes.pop(0) if self.outcomes else "sent"
 
@@ -134,7 +155,7 @@ class ApnsSender:
             self._post = client.post
         return self._post
 
-    def send(self, *, token, env, locale, case_id, **_ignored) -> str:
+    def send(self, *, token, env, locale, case_id, kind="money_request", **_ignored) -> str:
         host = APNS_HOSTS.get(env)
         if host is None:
             return "permanent"
@@ -149,7 +170,7 @@ class ApnsSender:
             response = self._client_post()(
                 f"{host}/3/device/{token}",
                 headers=headers,
-                content=json.dumps(apns_payload(case_id, locale)).encode("utf-8"),
+                content=json.dumps(apns_payload(case_id, locale, kind)).encode("utf-8"),
             )
         except Exception as exc:
             log.warning("apns send failed: %s", type(exc).__name__)
@@ -231,7 +252,7 @@ class FcmSender:
         self._access_until = now + (lifetime if isinstance(lifetime, int) else 3600)
         return token
 
-    def send(self, *, token, locale, case_id, **_ignored) -> str:
+    def send(self, *, token, locale, case_id, kind="money_request", **_ignored) -> str:
         try:
             access = self._access_token()
             if access is None:
@@ -240,7 +261,7 @@ class FcmSender:
             response = self._post(
                 f"https://fcm.googleapis.com/v1/projects/{self._project}/messages:send",
                 headers={"Authorization": f"Bearer {access}"},
-                json=fcm_message(token, case_id, locale),
+                json=fcm_message(token, case_id, locale, kind),
                 timeout=10,
             )
         except Exception as exc:
@@ -262,13 +283,13 @@ class PushRouter:
     def __init__(self, *, apns=None, fcm=None) -> None:
         self._senders = {"apns": apns, "fcm": fcm}
 
-    def send(self, *, provider, token, env, locale, case_id) -> str:
+    def send(self, *, provider, token, env, locale, case_id, kind="money_request") -> str:
         sender = self._senders.get(provider)
         if sender is None:
             log.warning("no push sender for %s", provider)
             return "transient"
         return sender.send(
-            provider=provider, token=token, env=env, locale=locale, case_id=case_id
+            provider=provider, token=token, env=env, locale=locale, case_id=case_id, kind=kind
         )
 
 
