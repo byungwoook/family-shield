@@ -45,6 +45,12 @@ OTP_TTL = timedelta(minutes=10)
 OTP_MAX_ATTEMPTS = 5
 OTP_SENDS_PER_DAY = 5
 OTP_CHANNELS = ("sms", "voice")
+# Milestone 16: the SMS allow link for a child with no app. It is opened
+# from a text, not typed, so it is long and URL-safe. A child abroad may not
+# see the text at once, hence three days rather than the invite's one.
+ALLOW_TTL = timedelta(hours=72)
+_ALLOW_DOMAIN = "allow"
+_ALLOW_SECRET = re.compile(r"[A-Za-z0-9_-]{32,64}")
 _INVITE_DOMAIN = "invite"
 _OTP_DOMAIN = "phone_otp"
 _SIX_DIGITS = re.compile(r"[0-9]{6}")
@@ -90,6 +96,18 @@ def normalize_invite(raw: object) -> str | None:
 
 def hash_invite(secret: str) -> str:
     return keyed_hash(_INVITE_DOMAIN, secret)
+
+
+def new_allow_secret() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def allow_secret_ok(value: object) -> bool:
+    return isinstance(value, str) and _ALLOW_SECRET.fullmatch(value) is not None
+
+
+def hash_allow(secret: str) -> str:
+    return keyed_hash(_ALLOW_DOMAIN, secret)
 
 
 def new_otp_code(rng: Callable[[int], bytes] | None = None) -> str:

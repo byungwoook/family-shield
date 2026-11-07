@@ -65,3 +65,14 @@ a token from a test app works), then open a case for that child.
 - [ ] Android: the same through FCM
 - [ ] No answer for 90 seconds: the phone rings with the fallback call
 - [ ] Uninstall the app, open a case: the dead token goes straight to the call
+
+## 6. Call-only child (milestone 16), needs Twilio and a public URL
+
+With `PUBLIC_BASE_URL` set, add a child by number (`POST .../call-only`) for a
+`+1` handset and a `+82` handset.
+
+- [ ] The text arrives with a link, in the number's language, and no code
+- [ ] A messenger's link preview does not use the link up (open it again afterwards)
+- [ ] Allow → SMS code → check code twice → done page; the code is never shown again
+- [ ] A case goes straight to the call and asks for that 4-digit code
+- [ ] A second link resets the code; the old code no longer works on the call
