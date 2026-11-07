@@ -40,6 +40,9 @@ android {
         release {
             buildConfigField("String", "API_BASE_URL", quoted(apiBase ?: ""))
             buildConfigField("boolean", "DEV_LOGIN", "false")
+            // Lets this variant compile and package before a Play upload key exists.
+            // Replace with the owner's release keystore before any store build.
+            signingConfig = signingConfigs.getByName("debug")
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
@@ -58,6 +61,9 @@ android {
     testOptions {
         unitTests.isIncludeAndroidResources = true
         unitTests.isReturnDefaultValues = true
+        unitTests.all {
+            it.systemProperty("fs.e2e.base", providers.gradleProperty("fsE2eBase").getOrElse(""))
+        }
     }
 }
 
@@ -70,6 +76,7 @@ kotlin {
 dependencies {
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)

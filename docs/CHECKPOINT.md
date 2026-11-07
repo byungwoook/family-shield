@@ -1,48 +1,42 @@
 # 체크포인트: 어디까지 했고, 어떻게 이어가는지
 
-마지막 갱신: 2026-11-07(로컬 macOS에서 백엔드 재확인, Android 빌드 직전까지 준비). 남은 작업은 **로컬에서** 이어간다. 이 파일만 읽으면 바로 시작할 수 있게 쓴다.
+마지막 갱신: 2026-11-07. 백엔드 v1은 main에 병합돼 있고, Android 부모 앱(M12) 화면은 `claude/m12-android-parent`에 구현돼 있다. 에뮬레이터 실행과 Firebase 토큰은 아직 없다. 이 파일만 읽으면 바로 시작할 수 있게 쓴다.
 설계의 권위는 [PRODUCT_REDESIGN.md](PRODUCT_REDESIGN.md), API의 권위는 코드와 그것을 옮긴 [API_CONTRACT.md](API_CONTRACT.md)다.
 
 ## 1. 한 줄 요약
 
-백엔드는 v1 범위(M1–M8, M15, M16)가 끝났다. 모바일 앱은 Android 프로젝트 골격과 앱이 쓸 API 계약까지만 있고, **앱 구현(M12)은 시작 전 상태로 멈췄다.**
+백엔드는 v1 범위(M1–M8, M15, M16)가 main에 병합됐다. Android 부모 앱(M12)은 이 브랜치에 구현돼 있고, JVM 단위 테스트와 DEV_AUTH 스모크까지 통과했다. 에뮬레이터에서 손으로 누르는 확인과 FCM 기기 토큰은 남아 있다.
 
 ## 2. PR 스택 (포크 `byungwoook/family-shield`, 원본에는 PR 없음)
 
-각 PR은 앞 PR 위에 쌓여 있다. 앞에서부터 병합하면 GitHub가 다음 PR의 base를 `main`으로 바꾼다.
+#5~#12는 main에 병합됐다. 이 브랜치는 그 main을 병합한 뒤 M12 앱을 올렸다.
 
 | PR | 브랜치 | 내용 | 상태 |
 |---|---|---|---|
-| #5 | `cursor/api-without-handset-da64` | M4 휴대폰 없이 테스트하는 API | 열림 |
-| #6 | `claude/m5-signin-invites-otp` | M5 Apple/Google 로그인, 초대, SMS OTP, 부모 확인 | 열림 |
-| #7 | `claude/m6-twilio-keypad-call` | M6 Twilio 키패드 대체 전화 | 열림 |
-| #8 | `claude/followups-child-view-timeline-otp-voice` | 자녀 화면 축소, 타임라인 순서, OTP 음성 대체 | 열림 |
-| #9 | `claude/m7-voice-note-claims` | M7 음성 메모 → 주장·사기 유형 | 열림 |
-| #10 | `claude/m8-push` | M8 푸시(APNs/FCM)와 케이스 타이머 | 열림 |
-| #11 | `claude/m15-number-change-caps` | M15 번호 변경, 케이스 상한, 24시간 규칙 | 열림 |
-| #12 | `claude/m16-call-only-child` | M16 앱 없는 자녀(SMS 링크 페이지) | 열림 |
-| #13 (초안) | `claude/m12-android-parent` | M12 준비: 백엔드 보강, API 계약, Android 골격 | 이 체크포인트 |
-| — | `wip/m12-android-partial` | M12 앱 코드 일부(빌드·리뷰 안 됨). **병합 금지, 참고용** | 보관 |
+| #5~#12 | (각 기능 브랜치) | M4~M8, M15, M16 | main에 병합 |
+| #13 (초안) | `claude/m12-android-parent` | M12 Android 부모 앱 | 초안. 에뮬레이터·FCM 기기 토큰이 남음 |
+| — | `wip/m12-android-partial` | 컴파일된 적 없는 초안. **병합 금지, 참고만** | 보관 |
 
 `claude/m12-android-parent`에 들어간 것:
 - 백엔드: `GET /v1/me`, `GET /v1/families/{id}/cases`, 로그인 nonce(`POST /v1/auth/nonce`, Apple/Google 로그인에 nonce 필수). `signin_nonces` 테이블 추가.
 - `docs/API_CONTRACT.md`: 코드에서 옮기고 경로별로 코드·실행 중인 백엔드와 대조해 고친 클라이언트 계약.
 - `android/`: Gradle 9.4.1 / AGP 9.2.1 / Kotlin 2.2.10 / Compose BOM 2025.06.01 골격(Fitrip 앱과 같은 툴체인). 화면은 자리표시 하나뿐.
 - #12의 보안 수정(운영에서 FastAPI 문서 경로 끄기)까지 병합해 둠.
-- 테스트: 백엔드 전체 **682 passed, 1 skipped**(건너뛴 1개는 안내 음성 mp3가 아직 없어서). Android 골격 빌드는 이 환경에서 **끝까지 확인하지 못했다**(첫 빌드가 의존성 다운로드 중 시간 제한에 걸린 뒤 중단).
+- 테스트: 백엔드 전체 **682 passed, 1 skipped**(`PGTZ=UTC`, 2026-11-07 이 환경에서 재확인. 건너뛴 1개는 안내 음성 mp3가 아직 없어서).
+- Android: `assembleDebug`, `assembleRelease`, `testDebugUnitTest` 통과. `-PfsE2eBase` 없이 단위 테스트는 **31 passed, 1 skipped**(e2e). DEV_AUTH 서버를 붙이면 e2e 1개도 통과(**32 passed**). 툴체인은 그대로다. Gradle 래퍼 `networkTimeout`만 10초에서 120초로 늘렸다. 예전에 배포본 다운로드가 그 10초에 끊겼다.
 
 ### 2026-11-06 로컬(macOS) 확인 결과
 - 코드 변경 없음. 이 커밋은 문서만 고친다.
 - 백엔드: `PGTZ=UTC`로 돌리면 **682 passed, 1 skipped**(클라우드와 같음). `PGTZ` 없이 Postgres 서버 시간대가 UTC가 아니면 `tests/test_me.py` 2개가 실패한다(아래 4절 "코드에서 발견한 것").
 - 개발 서버(DEV_AUTH)를 띄워 `/docs` 200, `POST /v1/auth/nonce` 201 확인.
-- Android: `local.properties`(SDK 경로)만 만들고 **Gradle은 아직 한 번도 실행하지 않았다.** 다음 작업이 첫 빌드다(5.3).
+- Android: 그날은 `local.properties`만 만들고 Gradle을 실행하지 않았다. 그 다음 Linux에서 빌드와 테스트를 확인했다(2절, 5.3).
 
 ## 3. 마일스톤 현황
 
 | 마일스톤 | 상태 |
 |---|---|
 | M1–M8, M15, M16 (백엔드) | 완료, PR #2–#12 |
-| M12 Android 부모 화면 | **준비만 완료.** 백엔드 보강·계약·골격 있음. 앱 구현 전 |
+| M12 Android 부모 화면 | **앱은 이 브랜치에 있음.** JVM 테스트와 DEV_AUTH 스모크 통과. 에뮬레이터 수동 확인과 FCM 기기 토큰은 남음. PR #13은 초안 |
 | M13 Android 공유 인텐트, M14 Android 자녀 화면 | 시작 전 |
 | M9–M11 iOS | 시작 전. 이 Linux 환경엔 Swift/Xcode가 없어 빌드 검증 불가(Mac 필요) |
 | M17 발신 번호 표시(iOS/Android) | 시작 전 |
@@ -59,10 +53,8 @@
 - **Apple Developer**(번들 ID, APNs 키), **Google/Firebase**(Android 패키지명, Google 로그인 서버 클라이언트 ID, FCM 서비스 계정).
 - 호스팅: `PUBLIC_BASE_URL`, Postgres 위치(설계 문서 열린 질문 7).
 
-### PR #5~#12 리뷰와 병합
-- 병합 전 전체 리뷰를 워크플로(리뷰어 10 + 지적마다 반박 검증 3)로 돌리다가 **토큰 사용이 커서 중단**했다. 수정이나 커밋은 하나도 나가지 않았다.
-- 병합은 아직 안 했다. #5부터 순서대로 병합하고, 병합할 때마다 다음 PR의 base를 `main`으로 바꾼다(브랜치를 지우면 GitHub가 자동으로 바꾼다).
-- 리뷰가 필요하면 PR 단위로 가볍게(`/code-review low` 등) 하는 것을 권한다.
+### PR #5~#12
+- main에 병합됐다. 이 브랜치도 그 main을 병합해 두었다.
 
 ### 코드에서 발견한 것
 - ~~운영에서 FastAPI 기본 문서 경로가 열려 있다~~ → **고침** (#12, `Stop serving the generated API docs outside DEV_AUTH`).
@@ -125,17 +117,23 @@ venv/bin/uvicorn --factory backend.api:boot --host 0.0.0.0 --port 8000
 - 에뮬레이터는 호스트의 백엔드를 `http://10.0.2.2:8000`으로 본다(디버그 빌드 기본값). 실제 기기는 `-PfsApiBase=http://<맥 IP>:8000`.
 - 디버그 빌드는 Google 로그인 대신 백엔드의 개발용 로그인(`POST /v1/dev/login`)을 쓴다. Google 클라이언트 ID가 생기면 `-PfsGoogleServerClientId=...`.
 - 클라우드 환경에서 겪은 문제(프록시 429, UTF-8 로캘, KVM 없음)는 로컬에서는 보통 생기지 않는다. 로캘 오류가 나면 `export LANG=en_US.UTF-8`.
-- **골격 빌드를 아직 한 번도 끝까지 확인하지 못했다.** 첫 작업은 위 빌드 명령이다.
+- 2026-11-07 이 Linux 환경에서 `assembleDebug`, `assembleRelease`, `testDebugUnitTest`를 끝까지 확인했다. JDK 21, SDK 36, build-tools 36.0.0. 릴리스 APK에는 `10.0.2.2`와 개발자 로그인 문구가 없다. 릴리스 서명은 아직 디버그 키다. 스토어에 올리기 전에 소유자 키스토어로 바꾼다.
 
-### 5.4 M12 작업 순서
-1. 계약은 [API_CONTRACT.md](API_CONTRACT.md)가 기준이다(코드와 대조해 검증됨).
-2. `wip/m12-android-partial`의 코드(약 2,000줄)는 한 번도 컴파일되지 않았다. 참고만 하고, 쓸 부분은 검토해서 가져온다:
-   - API 클라이언트, Keystore 세션 암호화, 저장소
-   - 결과 문구 매핑, 로그인·가족 만들기 화면, en/ko 문자열
-3. 완료 기준(설계 문서 M12):
-   - 화면: Google 로그인, 가족 만들기, 초대 코드 표시, 자녀 확인, 자녀를 골라 메시지를 붙여 케이스 열기, `GET /v1/cases/{id}` 폴링, 초록/빨강/노랑 문구(en, ko).
-   - UI 테스트: 빈 가족, 확인 전 자녀(Verify 비활성), 노랑 결과, 빨강 결과. 로컬에서는 에뮬레이터 UI 테스트로 확인할 수 있다.
-4. [resume/m12-android-workflow.js](resume/m12-android-workflow.js)는 이번에 쓴 다중 에이전트 계획이다. 토큰을 많이 쓰니 **필요할 때만** 참고한다. 경로는 클라우드 컨테이너 기준이다.
+### 5.4 M12에서 된 것과 남은 것
+된 것 (이 브랜치, `android/README.md`):
+- Google 로그인(Credential Manager, nonce는 SHA-256 hex, 서버에는 raw). 클라이언트 ID가 비면 버튼이 숨는다. 디버그만 `POST /v1/dev/login`.
+- 가족 만들기, 자녀 명단, 초대 코드 한 번 표시(복사·공유), 재발급, 가입 승인/거절, 번호 변경 승인/거절, 앱 없는 자녀(+1/+82, `unsupported_country`는 오류).
+- 확인 버튼은 `active`이고 `confirmed_at`이 있을 때만. 텍스트로 케이스를 연다. `member_not_callable`과 `rate_limited`는 케이스가 아니라 오류.
+- 케이스 화면은 보이는 동안 약 3초마다 폴링하고, 결정되면 멈춘다. 초록/빨강/노랑 문구(en, ko), 빨강은 가족 경고 복사.
+- 세션 토큰은 AES-GCM. 401이면 로그아웃. `POST /v1/me/push-token`(fcm)은 구현돼 있다.
+- 테스트: API 클라이언트, 문구 매핑, 폴링, 세션 암호, 문자열 표, Robolectric(빈 가족, 확인 전 자녀, 노랑, 빨강, 한국어). DEV_AUTH e2e는 잘못된 코드 → 노랑 `wrong`, 맞는 코드 다음 2 → 빨강 `not_sent`.
+
+남은 것 (그래서 #13은 초안):
+- 에뮬레이터/실기기에서 손으로 누르는 확인. 이 환경에는 KVM이 없다.
+- FCM 기기 토큰. `google-services.json`이 없어 등록 호출은 토큰이 없으면 아무것도 하지 않는다.
+- `BiometricPrompt`는 자녀 화면(M14)이다. 부모 M12에는 없다.
+- 음성 공유 인텐트는 M13이다. 이번 범위가 아니다.
+- 릴리스 서명은 디버그 키다.
 
 ### 5.5 그다음
 1. M13 공유 인텐트 → M14 Android 자녀 화면.
