@@ -2,7 +2,14 @@ import FamilyShieldCore
 import SwiftUI
 
 enum Theme {
-    static let accent = Color(red: 0.12, green: 0.29, blue: 0.43)
+    /// Lime is the only accent. Text on it stays ink.
+    static let accent = Color(red: 214 / 255, green: 254 / 255, blue: 57 / 255)
+    static let ink = Color(red: 13 / 255, green: 16 / 255, blue: 21 / 255)
+    static let cream = Color(red: 243 / 255, green: 240 / 255, blue: 233 / 255)
+
+    static func font(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
+        Font.custom("Pretendard Variable", size: size).weight(weight)
+    }
 
     static func background(_ color: CaseColor, scheme: ColorScheme) -> Color {
         switch (color, scheme) {
@@ -52,6 +59,7 @@ struct PrimaryButton: View {
         Button(title, action: action)
             .buttonStyle(.borderedProminent)
             .tint(Theme.accent)
+            .foregroundStyle(Theme.ink)
             .controlSize(.large)
             .frame(maxWidth: .infinity)
             .disabled(!enabled)

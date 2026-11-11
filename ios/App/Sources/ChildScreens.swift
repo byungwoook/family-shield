@@ -201,23 +201,46 @@ private struct OutboundLabelCard: View {
 
 private struct QuestionView: View {
     @Bindable var model: ChildModel
+    @State private var choice: String?
     private var locale: AppLocale { AppLocale.resolve() }
     var body: some View {
-        Text(CopyCatalog.text(.childQuestion, locale)).font(.title3).accessibilityIdentifier("child_question")
-        Text(CopyCatalog.text(.childQuestionHint, locale))
-        if ChildRules.canAnswer(model.prompt.caseState) {
-            PrimaryButton(title: CopyCatalog.text(.childYes, locale), identifier: "answer_yes", enabled: !model.busy) {
-                Task { await confirm(.answerYes, CopyCatalog.text(.biometricTitleAnswer, locale)) }
-            }
-            Button(CopyCatalog.text(.childNo, locale)) {
-                Task { await confirm(.answerNo, CopyCatalog.text(.biometricTitleAnswer, locale)) }
-            }
-            .buttonStyle(.bordered)
-            .disabled(model.busy)
-            .accessibilityIdentifier("answer_no")
+        let asker = model.childCase?.askerDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let amount = model.childCase?.requestAmount?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasContext = (asker?.isEmpty == false) || (amount?.isEmpty == false)
+        if let asker, !asker.isEmpty {
+            Text(asker).font(Theme.font(20, weight: .semibold))
+            Text(CopyCatalog.text(.childAskerSubtitle, locale, asker)).font(Theme.font(14))
         }
-        Button(CopyCatalog.text(.childNotNow, locale)) { model.notNow() }
-            .accessibilityIdentifier("not_now")
+        Text(hasContext ? CopyCatalog.text(.childQuestionShort, locale) : CopyCatalog.text(.childQuestion, locale))
+            .font(Theme.font(32, weight: .bold))
+            .accessibilityIdentifier("child_question")
+        if let amount, !amount.isEmpty {
+            Text(CopyCatalog.text(.childAmountLabel, locale)).font(Theme.font(14))
+            Text(amount).font(Theme.font(42, weight: .semibold))
+            Text(CopyCatalog.text(.childAmountSource, locale)).font(Theme.font(14))
+        }
+        if ChildRules.canAnswer(model.prompt.caseState) {
+            HStack {
+                Button(CopyCatalog.text(.childYes, locale)) { choice = "yes" }
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier("answer_yes")
+                Button(CopyCatalog.text(.childNo, locale)) { choice = "no" }
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier("answer_no")
+            }
+            PrimaryButton(
+                title: CopyCatalog.text(.childSubmitFace, locale),
+                identifier: "answer_submit",
+                enabled: choice != nil && !model.busy
+            ) {
+                let purpose: BiometricPurpose = choice == "yes" ? .answerYes : .answerNo
+                Task { await confirm(purpose, CopyCatalog.text(.biometricTitleAnswer, locale)) }
+            }
+        }
+        Button(action: { model.notNow() }) {
+            Image(systemName: "xmark").frame(width: 44, height: 44)
+        }
+        .accessibilityIdentifier("not_now")
         if ChildRules.canRevealCode(model.prompt.caseState) {
             Text(CopyCatalog.text(.childRevealHint, locale))
             if let code = model.prompt.revealedCode {

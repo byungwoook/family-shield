@@ -286,6 +286,67 @@ public enum CopyKey: String, CaseIterable, Sendable {
     case outboundLabelOn = "outbound_label_on"
     case outboundLabelOff = "outbound_label_off"
     case callerLabelBody = "caller_label_body"
+    case tabHome = "tab_home"
+    case tabHistory = "tab_history"
+    case tabFamily = "tab_family"
+    case homeBrand = "home_brand"
+    case homeGreeting = "home_greeting"
+    case homeGreetingPlain = "home_greeting_plain"
+    case homeHeroKicker = "home_hero_kicker"
+    case homeHeroTitle = "home_hero_title"
+    case homeSeeAll = "home_see_all"
+    case homeUsingApp = "home_using_app"
+    case homeLiveTitle = "home_live_title"
+    case homeUntilCall = "home_until_call"
+    case homeOpenProgress = "home_open_progress"
+    case homeStepPush = "home_step_push"
+    case homeStepBio = "home_step_bio"
+    case homeStepCall = "home_step_call"
+    case homeAmountLine = "home_amount_line"
+    case progressWaiting = "progress_waiting"
+    case progressStepPushTitle = "progress_step_push_title"
+    case progressStepPushBody = "progress_step_push_body"
+    case progressStepBioTitle = "progress_step_bio_title"
+    case progressStepBioBody = "progress_step_bio_body"
+    case progressStepCallTitle = "progress_step_call_title"
+    case progressStepCallBody = "progress_step_call_body"
+    case progressStepCallNone = "progress_step_call_none"
+    case progressVoiceLabel = "progress_voice_label"
+    case progressTextOnly = "progress_text_only"
+    case v3ResultNav = "v3_result_nav"
+    case v3Direct = "v3_direct"
+    case v3AnswerCaption = "v3_answer_caption"
+    case v3YesDetail = "v3_yes_detail"
+    case v3NoDetail = "v3_no_detail"
+    case v3HeadlineNo = "v3_headline_no"
+    case v3HeadlineYes = "v3_headline_yes"
+    case v3SheetScam = "v3_sheet_scam"
+    case v3SheetYes = "v3_sheet_yes"
+    case v3SheetYesBody = "v3_sheet_yes_body"
+    case v3Done = "v3_done"
+    case v3Share = "v3_share"
+    case v3Today = "v3_today"
+    case v3Yesterday = "v3_yesterday"
+    case historyTitle = "history_title"
+    case historyAll = "history_all"
+    case historyGreen = "history_green"
+    case historyRed = "history_red"
+    case historyYellow = "history_yellow"
+    case historyEmpty = "history_empty"
+    case familyRoleParent = "family_role_parent"
+    case familyChildCount = "family_child_count"
+    case familyInviteLink = "family_invite_link"
+    case familyCanCheck = "family_can_check"
+    case familyNumberEnding = "family_number_ending"
+    case shareKicker = "share_kicker"
+    case shareWho = "share_who"
+    case shareAsk = "share_ask"
+    case childRequestTitle = "child_request_title"
+    case childAskerSubtitle = "child_asker_subtitle"
+    case childQuestionShort = "child_question_short"
+    case childAmountLabel = "child_amount_label"
+    case childAmountSource = "child_amount_source"
+    case childSubmitFace = "child_submit_face"
 }
 
 public enum AppLocale: String, Sendable, Equatable {
@@ -1438,5 +1499,66 @@ public enum CopyCatalog {
             .en: "Family Shield is calling for your family.",
             .ko: "패밀리 쉴드가 가족을 대신해 전화하고 있어요.",
         ],
+        .tabHome: [.en: "Home", .ko: "홈"],
+        .tabHistory: [.en: "History", .ko: "확인 기록"],
+        .tabFamily: [.en: "Family", .ko: "가족"],
+        .homeBrand: [.en: "FAMILY SHIELD", .ko: "FAMILY SHIELD"],
+        .homeGreeting: [.en: "Hello, %1$s", .ko: "%1$s님, 안녕하세요"],
+        .homeGreetingPlain: [.en: "Hello", .ko: "안녕하세요"],
+        .homeHeroKicker: [.en: "BEFORE YOU PAY", .ko: "BEFORE YOU PAY"],
+        .homeHeroTitle: [.en: "A request came in.\nCheck it with your child.", .ko: "받은 요청,\n자녀에게 확인하세요"],
+        .homeSeeAll: [.en: "See all", .ko: "모두 보기"],
+        .homeUsingApp: [.en: "Using the app", .ko: "앱 사용"],
+        .homeLiveTitle: [.en: "Checking with %1$s", .ko: "%1$s에게 확인 중"],
+        .homeUntilCall: [.en: "Until the call", .ko: "전화 확인까지"],
+        .homeOpenProgress: [.en: "See progress", .ko: "진행 상황 보기"],
+        .homeStepPush: [.en: "Alert", .ko: "앱 알림"],
+        .homeStepBio: [.en: "Identity", .ko: "본인 확인"],
+        .homeStepCall: [.en: "Call", .ko: "전화 확인"],
+        .homeAmountLine: [.en: "%1$s request", .ko: "%1$s 요청"],
+        .progressWaiting: [.en: "Waiting for an answer in the app", .ko: "앱으로 답변을 기다리고 있어요"],
+        .progressStepPushTitle: [.en: "Sent an alert in the app", .ko: "앱으로 알림을 보냈어요"],
+        .progressStepPushBody: [.en: "Today %1$s", .ko: "오늘 %1$s"],
+        .progressStepBioTitle: [.en: "Answer after an identity check", .ko: "본인 확인 후 답변"],
+        .progressStepBioBody: [.en: "Continues when %1$s opens the app", .ko: "%1$s님이 앱을 열면 진행돼요"],
+        .progressStepCallTitle: [.en: "Call if there is no answer", .ko: "답이 없으면 전화해요"],
+        .progressStepCallBody: [.en: "Registered number ending %1$s", .ko: "등록된 번호 끝자리 %1$s로"],
+        .progressStepCallNone: [.en: "The registered number", .ko: "등록된 번호로"],
+        .progressVoiceLabel: [.en: "Voice message received", .ko: "받은 음성 메시지"],
+        .progressTextOnly: [.en: "The original voice file is not on this phone. The text below is the message that was checked.", .ko: "원본 음성은 이 휴대폰에 없어요. 아래는 확인한 메시지예요."],
+        .v3ResultNav: [.en: "Result", .ko: "확인 결과"],
+        .v3Direct: [.en: "DIRECT ANSWER", .ko: "DIRECT ANSWER"],
+        .v3AnswerCaption: [.en: "Answer after an identity check", .ko: "본인 확인 후 답변"],
+        .v3YesDetail: [.en: "I sent it", .ko: "제가 보냈어요"],
+        .v3NoDetail: [.en: "I didn't send it", .ko: "보내지 않았어요"],
+        .v3HeadlineNo: [.en: "%1$s didn't send\nthis request", .ko: "%1$s 보낸\n요청이 아니에요"],
+        .v3HeadlineYes: [.en: "This request matches\nwhat %1$s sent", .ko: "%1$s 보낸\n요청이 맞아요"],
+        .v3SheetScam: [.en: "This may be a scam", .ko: "사기가 의심돼요"],
+        .v3SheetYes: [.en: "Talk before you send", .ko: "보내기 전, 직접 이야기하세요"],
+        .v3SheetYesBody: [.en: "Contact %1$s directly and check the request once more.", .ko: "%1$s에게 직접 연락해 요청 내용을 한 번 더 확인하세요."],
+        .v3Done: [.en: "Done checking", .ko: "확인 완료"],
+        .v3Share: [.en: "Share a warning with your family", .ko: "가족에게 경고 공유"],
+        .v3Today: [.en: "Today", .ko: "오늘"],
+        .v3Yesterday: [.en: "Yesterday", .ko: "어제"],
+        .historyTitle: [.en: "History", .ko: "확인 기록"],
+        .historyAll: [.en: "All", .ko: "전체"],
+        .historyGreen: [.en: "Confirmed", .ko: "확인됨"],
+        .historyRed: [.en: "Suspected scam", .ko: "사기 의심"],
+        .historyYellow: [.en: "Not confirmed", .ko: "확인 안 됨"],
+        .historyEmpty: [.en: "Nothing in this filter yet.", .ko: "이 필터에는 아직 기록이 없어요."],
+        .familyRoleParent: [.en: "Parent who manages the family", .ko: "가족을 관리하는 보호자"],
+        .familyChildCount: [.en: "%1$d children", .ko: "자녀 %1$d명"],
+        .familyInviteLink: [.en: "Invite", .ko: "초대하기"],
+        .familyCanCheck: [.en: "Can answer in the app", .ko: "앱으로 확인 가능"],
+        .familyNumberEnding: [.en: "Number ending %1$s", .ko: "번호 끝자리 %1$s"],
+        .shareKicker: [.en: "VOICE NOTE", .ko: "VOICE NOTE"],
+        .shareWho: [.en: "Who should we ask?", .ko: "누구에게 물어볼까요?"],
+        .shareAsk: [.en: "Ask %1$s", .ko: "%1$s에게 확인 요청"],
+        .childRequestTitle: [.en: "Family check", .ko: "가족 확인 요청"],
+        .childAskerSubtitle: [.en: "%1$s asked you to confirm", .ko: "%1$s님이 확인을 부탁했어요"],
+        .childQuestionShort: [.en: "Did you send this request?", .ko: "이 요청, 직접 보냈나요?"],
+        .childAmountLabel: [.en: "Amount in the request", .ko: "요청 금액"],
+        .childAmountSource: [.en: "From a voice message", .ko: "음성 메시지로 받은 요청"],
+        .childSubmitFace: [.en: "Confirm with Face ID and send", .ko: "Face ID로 답변 보내기"],
     ]
 }

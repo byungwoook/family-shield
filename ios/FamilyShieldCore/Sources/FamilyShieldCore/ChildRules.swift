@@ -208,8 +208,12 @@ public struct ChildCase: Codable, Equatable, Sendable {
     public var createdAt: String
     public var updatedAt: String
     public var decidedAt: String?
+    /// Parent membership that opened the case. Never a name taken from the message.
+    public var askerDisplayName: String?
+    /// Claimed amount from the message, or nil. Not a verified transfer.
+    public var requestAmount: String?
 
-    public init(id: String, childMemberId: String = "child", kind: String = "money_request", state: String, result: String? = nil, color: String, answeredVia: String? = nil, codeChannel: String? = nil, gather: String? = nil, deadlineAt: String? = nil, createdAt: String = "2026-11-07T00:00:00+00:00", updatedAt: String = "2026-11-07T00:00:00+00:00", decidedAt: String? = nil) {
+    public init(id: String, childMemberId: String = "child", kind: String = "money_request", state: String, result: String? = nil, color: String, answeredVia: String? = nil, codeChannel: String? = nil, gather: String? = nil, deadlineAt: String? = nil, createdAt: String = "2026-11-07T00:00:00+00:00", updatedAt: String = "2026-11-07T00:00:00+00:00", decidedAt: String? = nil, askerDisplayName: String? = nil, requestAmount: String? = nil) {
         self.id = id
         self.childMemberId = childMemberId
         self.kind = kind
@@ -223,5 +227,7 @@ public struct ChildCase: Codable, Equatable, Sendable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.decidedAt = decidedAt
+        self.askerDisplayName = askerDisplayName
+        self.requestAmount = requestAmount
     }
 }

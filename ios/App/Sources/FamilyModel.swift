@@ -22,8 +22,9 @@ final class FamilyModel {
 
     private let familyId: String
     private let api: APIClient
-    private var members: [Member] = []
-    private var recent: [CaseSummary] = []
+    var members: [Member] = []
+    var recent: [CaseSummary] = []
+    var parentName = ""
 
     var familyName: String
     var home = FamilyHomeState(familyName: "", children: [], recent: [])

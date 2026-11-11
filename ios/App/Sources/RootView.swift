@@ -83,8 +83,11 @@ struct ParentHost: View {
         }
         .task(id: familyId) {
             if family == nil {
-                family = FamilyModel(familyId: familyId, familyName: familyName, api: app.api)
+                let created = FamilyModel(familyId: familyId, familyName: familyName, api: app.api)
+                created.parentName = app.parentDisplayName
+                family = created
             }
+            family?.parentName = app.parentDisplayName
             await family?.refresh()
             guard let share = app.share, let directory = app.shareDirectory else { return }
             let audio: DraftAudio? = {
