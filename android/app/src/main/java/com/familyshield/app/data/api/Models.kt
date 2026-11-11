@@ -202,6 +202,8 @@ data class CaseSummary(
     val state: String,
     val result: String? = null,
     val color: String,
+    @SerialName("request_amount") val requestAmount: String? = null,
+    @SerialName("deadline_at") val deadlineAt: String? = null,
     @SerialName("created_at") val createdAt: String,
     @SerialName("decided_at") val decidedAt: String? = null,
 )
@@ -269,7 +271,7 @@ data class PushTokenRegistered(val status: String, val provider: String)
 @Serializable
 data class AnswerRequest(val answer: String)
 
-/** The child case body (`CHILD_CASE_KEYS`): no text, names, phone, or timeline. */
+/** The child case body. No transcript, claimed identity, phone, or codes. */
 @Serializable
 data class ChildCase(
     val id: String,
@@ -285,6 +287,8 @@ data class ChildCase(
     @SerialName("created_at") val createdAt: String,
     @SerialName("updated_at") val updatedAt: String,
     @SerialName("decided_at") val decidedAt: String? = null,
+    @SerialName("asker_display_name") val askerDisplayName: String? = null,
+    @SerialName("request_amount") val requestAmount: String? = null,
 )
 
 /** GET /v1/cases/{id}/call-code: `{"code": "123456"}` or `{"code": null, "fallback": "static"}`. */

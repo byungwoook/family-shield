@@ -4,11 +4,17 @@ import android.Manifest
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -21,10 +27,16 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -35,6 +47,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -199,6 +212,8 @@ fun ChildRoute(
             onNotNow = viewModel::notNow,
             onReveal = viewModel::requestReveal,
             onHideCode = viewModel::hideCode,
+            askerName = open.askerDisplayName,
+            requestAmount = open.requestAmount,
         )
         else -> ChildHomeContent(
             familyName = state.familyName,
@@ -438,7 +453,6 @@ fun ChildHomeContent(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun QuestionContent(
     calling: Boolean,
@@ -451,64 +465,125 @@ fun QuestionContent(
     onNotNow: () -> Unit,
     onReveal: () -> Unit,
     onHideCode: () -> Unit,
+    askerName: String? = null,
+    requestAmount: String? = null,
+    initialChoice: String? = null,
 ) {
-    Scaffold(
-        topBar = { TopAppBar(title = { Text(stringResource(R.string.app_name)) }) },
-    ) { padding ->
-        FormColumn(Modifier.padding(padding)) {
+    val palette = com.familyshield.app.ui.theme.LocalFsPalette.current
+    var choice by remember { mutableStateOf(initialChoice) }
+    val asker = askerName?.takeIf { it.isNotBlank() }
+    val amount = requestAmount?.takeIf { it.isNotBlank() }
+    Column(Modifier.fillMaxSize().background(palette.bg)) {
+    Column(
+        Modifier
+            .weight(1f)
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp),
+    ) {
+        Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.size(44.dp).testTag("not_now").clickable(onClick = onNotNow),
+                contentAlignment = Alignment.Center,
+            ) { com.familyshield.app.ui.v3.CloseIcon(palette.text) }
             Text(
-                stringResource(R.string.child_question),
-                style = MaterialTheme.typography.headlineSmall,
-                modifier = Modifier.testTag("child_question"),
+                stringResource(R.string.child_request_title),
+                modifier = Modifier.weight(1f),
+                color = palette.text,
+                fontFamily = com.familyshield.app.ui.theme.Pretendard,
+                fontWeight = FontWeight(650),
+                fontSize = 17.sp,
+                textAlign = TextAlign.Center,
             )
-            Text(stringResource(R.string.child_question_hint), style = MaterialTheme.typography.bodyLarge)
-            Button(
-                onClick = onYes,
-                enabled = !busy,
-                modifier = Modifier.fillMaxWidth().testTag("answer_yes"),
-            ) { Text(stringResource(R.string.child_yes)) }
-            Button(
-                onClick = onNo,
-                enabled = !busy,
-                modifier = Modifier.fillMaxWidth().testTag("answer_no"),
-            ) { Text(stringResource(R.string.child_no)) }
-            TextButton(onClick = onNotNow, modifier = Modifier.testTag("not_now")) {
-                Text(stringResource(R.string.child_not_now))
-            }
-            if (calling) {
-                Text(stringResource(R.string.child_reveal_hint), style = MaterialTheme.typography.bodyMedium)
-                if (revealedCode != null) {
-                    val label = stringResource(R.string.cd_one_time_code)
-                    Text(
-                        revealedCode,
-                        style = MaterialTheme.typography.displaySmall,
-                        fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("one_time_code")
-                            .semantics { contentDescription = label },
-                    )
-                    Text(stringResource(R.string.child_code_shown), style = MaterialTheme.typography.bodyMedium)
-                    TextButton(onClick = onHideCode, modifier = Modifier.testTag("hide_code")) {
-                        Text(stringResource(R.string.child_hide_code))
-                    }
-                } else {
-                    Button(
-                        onClick = onReveal,
-                        enabled = !busy,
-                        modifier = Modifier.fillMaxWidth().testTag("reveal_code"),
-                    ) { Text(stringResource(R.string.child_reveal)) }
-                    if (callFallback) {
-                        Text(
-                            stringResource(R.string.child_fallback_static),
-                            modifier = Modifier.testTag("call_fallback"),
-                        )
-                    }
+            Spacer(Modifier.size(44.dp))
+        }
+        if (asker != null) {
+            Row(Modifier.padding(top = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                com.familyshield.app.ui.v3.InitialAvatar(asker, size = 52.dp)
+                Column(Modifier.padding(start = 12.dp)) {
+                    Text(asker, color = palette.text, fontFamily = com.familyshield.app.ui.theme.Pretendard, fontWeight = FontWeight(650), fontSize = 20.sp)
+                    Text(stringResource(R.string.child_asker_subtitle, asker), color = palette.muted, fontFamily = com.familyshield.app.ui.theme.Pretendard, fontSize = 14.sp)
                 }
             }
-            error?.let { ErrorText(it) }
         }
+        Text(
+            if (asker != null || amount != null) stringResource(R.string.child_question_short) else stringResource(R.string.child_question),
+            color = palette.text,
+            fontFamily = com.familyshield.app.ui.theme.Pretendard,
+            fontWeight = FontWeight(700),
+            fontSize = 32.sp,
+            lineHeight = 40.sp,
+            modifier = Modifier.padding(top = 20.dp).testTag("child_question"),
+        )
+        if (amount != null) {
+            Column(
+                Modifier.padding(top = 16.dp).fillMaxWidth().clip(androidx.compose.foundation.shape.RoundedCornerShape(24.dp)).background(palette.surface).padding(20.dp),
+            ) {
+                Text(stringResource(R.string.child_amount_label), color = palette.muted, fontFamily = com.familyshield.app.ui.theme.Pretendard, fontSize = 14.sp)
+                Text(amount, color = palette.text, fontFamily = com.familyshield.app.ui.theme.Pretendard, fontWeight = FontWeight(650), fontSize = 42.sp, lineHeight = 52.sp)
+                Text(stringResource(R.string.child_amount_source), color = palette.muted, fontFamily = com.familyshield.app.ui.theme.Pretendard, fontSize = 14.sp, modifier = Modifier.padding(top = 8.dp))
+            }
+        }
+        Row(Modifier.padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            AnswerTile(stringResource(R.string.child_yes), stringResource(R.string.v3_yes_detail), choice == "yes", "answer_yes", Modifier.weight(1f)) { choice = "yes" }
+            AnswerTile(stringResource(R.string.child_no), stringResource(R.string.v3_no_detail), choice == "no", "answer_no", Modifier.weight(1f)) { choice = "no" }
+        }
+        if (calling) {
+            Text(stringResource(R.string.child_reveal_hint), color = palette.muted, fontFamily = com.familyshield.app.ui.theme.Pretendard, modifier = Modifier.padding(top = 16.dp))
+            if (revealedCode != null) {
+                val label = stringResource(R.string.cd_one_time_code)
+                Text(
+                    revealedCode,
+                    fontFamily = com.familyshield.app.ui.theme.Pretendard,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 40.sp,
+                    textAlign = TextAlign.Center,
+                    color = palette.text,
+                    modifier = Modifier.fillMaxWidth().testTag("one_time_code").semantics { contentDescription = label },
+                )
+                Text(stringResource(R.string.child_code_shown), color = palette.muted, fontFamily = com.familyshield.app.ui.theme.Pretendard)
+                TextButton(onClick = onHideCode, modifier = Modifier.testTag("hide_code")) { Text(stringResource(R.string.child_hide_code)) }
+            } else {
+                Button(onClick = onReveal, enabled = !busy, modifier = Modifier.fillMaxWidth().testTag("reveal_code")) {
+                    Text(stringResource(R.string.child_reveal))
+                }
+                if (callFallback) {
+                    Text(stringResource(R.string.child_fallback_static), modifier = Modifier.testTag("call_fallback"), color = palette.text)
+                }
+            }
+        }
+        error?.let { ErrorText(it) }
+        Spacer(Modifier.size(24.dp))
+    }
+        val submitLabel = stringResource(R.string.child_submit_bio)
+        com.familyshield.app.ui.v3.LimeButton(
+            label = submitLabel,
+            enabled = choice != null && !busy,
+            onClick = { if (choice == "yes") onYes() else if (choice == "no") onNo() },
+            modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 24.dp).testTag("answer_submit"),
+            leading = { com.familyshield.app.ui.v3.FaceIcon(palette.ink) },
+        )
+    }
+}
+
+@Composable
+private fun AnswerTile(title: String, detail: String, selected: Boolean, tag: String, modifier: Modifier, onClick: () -> Unit) {
+    val palette = com.familyshield.app.ui.theme.LocalFsPalette.current
+    val bg = if (selected) palette.ink else palette.surface
+    val fg = if (selected) palette.bg else palette.text
+    val muted = if (selected) palette.heroMuted else palette.muted
+    Column(
+        modifier
+            .clip(androidx.compose.foundation.shape.RoundedCornerShape(20.dp))
+            .background(bg)
+            .clickable(onClick = onClick)
+            .testTag(tag)
+            .padding(16.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(title, color = fg, fontFamily = com.familyshield.app.ui.theme.Pretendard, fontWeight = FontWeight(700), fontSize = 22.sp, modifier = Modifier.weight(1f))
+            if (selected) com.familyshield.app.ui.v3.CheckIcon(fg)
+        }
+        Text(detail, color = muted, fontFamily = com.familyshield.app.ui.theme.Pretendard, fontSize = 14.sp, modifier = Modifier.padding(top = 4.dp))
     }
 }
 

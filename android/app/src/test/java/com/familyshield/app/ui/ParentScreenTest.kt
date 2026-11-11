@@ -8,6 +8,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollTo
 import com.familyshield.app.sampleCase
 import com.familyshield.app.sampleChild
 import com.familyshield.app.ui.caseflow.CaseContent
@@ -53,7 +54,7 @@ class ParentScreenTest {
                 )
             }
         }
-        compose.onNodeWithText("No children yet").assertIsDisplayed()
+        compose.onNodeWithText("No children yet").performScrollTo().assertIsDisplayed()
     }
 
     @Test
@@ -86,7 +87,8 @@ class ParentScreenTest {
                 )
             }
         }
-        compose.onNodeWithText("Can't verify yet: confirm Mina first.").assertIsDisplayed()
+        compose.onNodeWithTag("tab_family").performClick()
+        compose.onNodeWithText("Can't verify yet: confirm Mina first.").performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("verify_child-1").assertIsNotEnabled()
     }
 
@@ -127,9 +129,9 @@ class ParentScreenTest {
                 )
             }
         }
-        compose.onNodeWithText("Scam").assertIsDisplayed()
-        compose.onNodeWithText("Do not send money", substring = true).assertIsDisplayed()
-        compose.onNodeWithText("Warn your family").assertIsDisplayed()
+        compose.onNodeWithText("This may be a scam").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Do not send money", substring = true).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Warn your family").performScrollTo().assertIsDisplayed()
     }
 
     @Test
@@ -189,7 +191,7 @@ class KoreanResultTest {
                 )
             }
         }
-        compose.onNodeWithText("돈을 보내지 마세요", substring = true).assertIsDisplayed()
-        compose.onNodeWithText("가족에게 알리세요").assertIsDisplayed()
+        compose.onNodeWithText("돈을 보내지 마세요", substring = true).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("가족에게 알리세요").performScrollTo().assertIsDisplayed()
     }
 }

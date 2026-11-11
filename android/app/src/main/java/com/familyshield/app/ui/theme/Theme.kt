@@ -1,43 +1,154 @@
 package com.familyshield.app.ui.theme
 
+import android.app.Activity
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.ExperimentalTextApi
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontVariation
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
+import androidx.core.view.WindowCompat
+import com.familyshield.app.R
 import com.familyshield.app.domain.CaseColor
 
-private val LightColors = lightColorScheme(
-    primary = Color(0xFF1F5FAD),
-    onPrimary = Color.White,
-    primaryContainer = Color(0xFFD6E3FF),
-    onPrimaryContainer = Color(0xFF001B3E),
-    secondary = Color(0xFF555F71),
-    background = Color(0xFFFAF9FD),
-    surface = Color(0xFFFAF9FD),
-    error = Color(0xFFBA1A1A),
+@OptIn(ExperimentalTextApi::class)
+private fun pretendard(weight: Int) = Font(
+    R.font.pretendard_variable,
+    weight = FontWeight(weight),
+    variationSettings = FontVariation.Settings(FontVariation.weight(weight)),
 )
 
-private val DarkColors = darkColorScheme(
-    primary = Color(0xFFAAC7FF),
-    onPrimary = Color(0xFF002F65),
-    primaryContainer = Color(0xFF00468E),
-    onPrimaryContainer = Color(0xFFD6E3FF),
-    secondary = Color(0xFFBDC7DC),
-    background = Color(0xFF111318),
-    surface = Color(0xFF111318),
-    error = Color(0xFFFFB4AB),
+val Pretendard = FontFamily(
+    pretendard(400),
+    pretendard(500),
+    pretendard(600),
+    pretendard(650),
+    pretendard(700),
 )
 
-/** Container and content colours for one result colour. Text on them meets WCAG AA in both themes. */
+@Immutable
+data class FsPalette(
+    val bg: Color,
+    val surface: Color,
+    val text: Color,
+    val muted: Color,
+    val line: Color,
+    val avatar: Color,
+    val hero: Color,
+    val heroMuted: Color,
+    val heroFuture: Color,
+    val lime: Color,
+    val ink: Color,
+    val green: Color,
+    val red: Color,
+    val yellow: Color,
+    val sheet: Color,
+    val sheetText: Color,
+    val sheetMuted: Color,
+    val answerNo: Color,
+    val isDark: Boolean,
+)
+
+private val Lime = Color(0xFFD6FE39)
+private val Ink = Color(0xFF0D1015)
+private val AnswerNo = Color(0xFFFF9991)
+
+val LightPalette = FsPalette(
+    bg = Color(0xFFF3F0E9),
+    surface = Color(0xFFFFFDF8),
+    text = Ink,
+    muted = Color(0xFF676B65),
+    line = Color(0xFFD5D4CB),
+    avatar = Color(0xFFE4E1D8),
+    hero = Ink,
+    heroMuted = Color(0xFFB1B5B0),
+    heroFuture = Color(0xFF98A196),
+    lime = Lime,
+    ink = Ink,
+    green = Color(0xFF216B40),
+    red = Color(0xFFB83232),
+    yellow = Color(0xFF806100),
+    sheet = Color(0xFFF3F0E9),
+    sheetText = Ink,
+    sheetMuted = Color(0xFF5C625C),
+    answerNo = AnswerNo,
+    isDark = false,
+)
+
+val DarkPalette = FsPalette(
+    bg = Color(0xFF101419),
+    surface = Color(0xFF1D2329),
+    text = Color(0xFFF3F0E9),
+    muted = Color(0xFFAFB5AE),
+    line = Color(0xFF3B4147),
+    avatar = Color(0xFF343C43),
+    hero = Color(0xFF252C33),
+    heroMuted = Color(0xFFB1B5B0),
+    heroFuture = Color(0xFF98A196),
+    lime = Lime,
+    ink = Ink,
+    green = Color(0xFFADE3BA),
+    red = AnswerNo,
+    yellow = Color(0xFFE7D17C),
+    sheet = Color(0xFF20272D),
+    sheetText = Color(0xFFF3F0E9),
+    sheetMuted = Color(0xFFBDC3BA),
+    answerNo = AnswerNo,
+    isDark = true,
+)
+
+val LocalFsPalette = staticCompositionLocalOf { LightPalette }
+
+private fun fs(size: Int, line: Int, weight: Int, tracking: Float = -0.35f) = TextStyle(
+    fontFamily = Pretendard,
+    fontWeight = FontWeight(weight),
+    fontSize = size.sp,
+    lineHeight = line.sp,
+    letterSpacing = tracking.sp,
+)
+
+private val FsTypography = Typography(
+    displayLarge = fs(64, 76, 600, -1.3f),
+    displayMedium = fs(44, 50, 600, -1.1f),
+    displaySmall = fs(38, 46, 700, -1.2f),
+    headlineLarge = fs(32, 40, 700, -1.1f),
+    headlineMedium = fs(26, 36, 700, -0.9f),
+    headlineSmall = fs(24, 31, 600, -0.75f),
+    titleLarge = fs(20, 28, 650, -0.6f),
+    titleMedium = fs(17, 24, 650, -0.35f),
+    titleSmall = fs(15, 22, 500, -0.35f),
+    bodyLarge = fs(17, 26, 400, -0.35f),
+    bodyMedium = fs(15, 22, 400, -0.35f),
+    bodySmall = fs(14, 21, 400, -0.2f),
+    labelLarge = fs(17, 24, 650, -0.35f),
+    labelMedium = fs(13, 20, 500, -0.2f),
+    labelSmall = fs(12, 16, 500, 0.4f),
+)
+
 @Immutable
 data class ResultTone(val container: Color, val content: Color)
 
 @Immutable
-data class ResultTones(val green: ResultTone, val red: ResultTone, val yellow: ResultTone, val open: ResultTone) {
+data class ResultTones(
+    val green: ResultTone,
+    val red: ResultTone,
+    val yellow: ResultTone,
+    val open: ResultTone,
+) {
     fun of(color: CaseColor): ResultTone = when (color) {
         CaseColor.GREEN -> green
         CaseColor.RED -> red
@@ -46,28 +157,61 @@ data class ResultTones(val green: ResultTone, val red: ResultTone, val yellow: R
     }
 }
 
-private val LightTones = ResultTones(
-    green = ResultTone(Color(0xFFD3F5DA), Color(0xFF0B3D1A)),
-    red = ResultTone(Color(0xFFFFDAD6), Color(0xFF5C0A0A)),
-    yellow = ResultTone(Color(0xFFFFEDB3), Color(0xFF3D2E00)),
-    open = ResultTone(Color(0xFFE3E7F2), Color(0xFF1A1C22)),
+private fun tones(palette: FsPalette) = ResultTones(
+    green = ResultTone(palette.surface, palette.green),
+    red = ResultTone(palette.surface, palette.red),
+    yellow = ResultTone(palette.surface, palette.yellow),
+    open = ResultTone(palette.surface, palette.text),
 )
 
-private val DarkTones = ResultTones(
-    green = ResultTone(Color(0xFF14522A), Color(0xFFD3F5DA)),
-    red = ResultTone(Color(0xFF7A1717), Color(0xFFFFDAD6)),
-    yellow = ResultTone(Color(0xFF5C4600), Color(0xFFFFEDB3)),
-    open = ResultTone(Color(0xFF2E3138), Color(0xFFE3E7F2)),
-)
+val LocalResultTones = staticCompositionLocalOf { tones(LightPalette) }
 
-val LocalResultTones = staticCompositionLocalOf { LightTones }
-
-/** The app theme. Dark follows the system setting. */
 @Composable
 fun FamilyShieldTheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = if (dark) DarkColors else LightColors) {
-        androidx.compose.runtime.CompositionLocalProvider(
-            LocalResultTones provides if (dark) DarkTones else LightTones,
+    val palette = if (dark) DarkPalette else LightPalette
+    val scheme = if (dark) {
+        darkColorScheme(
+            primary = palette.lime,
+            onPrimary = palette.ink,
+            background = palette.bg,
+            onBackground = palette.text,
+            surface = palette.surface,
+            onSurface = palette.text,
+            surfaceVariant = palette.avatar,
+            onSurfaceVariant = palette.muted,
+            outline = palette.line,
+            error = palette.red,
+            onError = palette.ink,
+        )
+    } else {
+        lightColorScheme(
+            primary = palette.lime,
+            onPrimary = palette.ink,
+            background = palette.bg,
+            onBackground = palette.text,
+            surface = palette.surface,
+            onSurface = palette.text,
+            surfaceVariant = palette.avatar,
+            onSurfaceVariant = palette.muted,
+            outline = palette.line,
+            error = palette.red,
+            onError = palette.surface,
+        )
+    }
+    val view = LocalView.current
+    if (!view.isInEditMode) {
+        SideEffect {
+            val window = (view.context as? Activity)?.window ?: return@SideEffect
+            window.statusBarColor = palette.bg.toArgb()
+            window.navigationBarColor = palette.bg.toArgb()
+            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !dark
+            WindowCompat.getInsetsController(window, view).isAppearanceLightNavigationBars = !dark
+        }
+    }
+    MaterialTheme(colorScheme = scheme, typography = FsTypography) {
+        CompositionLocalProvider(
+            LocalFsPalette provides palette,
+            LocalResultTones provides tones(palette),
             content = content,
         )
     }
