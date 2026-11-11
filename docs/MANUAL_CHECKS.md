@@ -93,7 +93,7 @@ Not run here: this environment has no KVM, so BiometricPrompt cannot be approved
 
 - [ ] Accept the invite, enter a `+1` or `+82` number, enter the SMS code, and set the 4-digit check code twice
 - [ ] A push opens the question. The notification has no Yes/No action and no code
-- [ ] BiometricPrompt, then Yes or No. Not now does not answer, and after 90 seconds the phone rings
+- [ ] Choose Yes or No, then BiometricPrompt. Nothing is sent until biometrics succeed. Not now does not answer, and after 90 seconds the phone rings
 - [ ] While that call is in progress, BiometricPrompt reveals the 6-digit code. It is not on the lock screen
 - [ ] Resetting the check code asks for biometrics again, and the old code no longer works on a call
 
@@ -162,7 +162,7 @@ On a simulator with a simulated Face ID (Features > Face ID > Enrolled), then on
 
 - [ ] Accept an invite, enter a `+1` or `+82` number, enter the SMS code from the server log (`DevOtp`), and set the 4-digit check code twice
 - [ ] A push opens the question. The notification is only "Family Shield needs you to confirm a request." It has no Yes/No action and no code
-- [ ] Face ID, then Yes or No. Not now does not answer, and after 90 seconds the phone rings
+- [ ] Choose Yes or No, then Face ID. Nothing is sent until Face ID succeeds. Not now does not answer, and after 90 seconds the phone rings
 - [ ] While that call is in progress, Face ID reveals the 6-digit code. It is not on the lock screen
 - [ ] Resetting the check code asks for Face ID again, and the old code no longer works on a call
 - [ ] A sandbox device token is registered with `POST /v1/me/push-token` (`env=sandbox` on a Debug build)
@@ -208,3 +208,18 @@ On an Android emulator or device, API 29 or later (the role does not exist befor
 - [ ] A call from any other number, including the child's, rings and is not labeled Family Shield
 - [ ] The system permission prompt does not ask for contacts, and the app does not ask to record audio
 - [ ] Decline the role, or turn it off in system settings, and confirm the check code still works (section 8)
+
+## 13. v3 visual check against the mockups
+
+Compare the parent and child screens with `docs/design/v3/` on a phone-sized window (390 × 844 pt) in light and dark. The PNGs are the reference. Tokens are in `tokens.json`. Pretendard is the Korean UI font. The lime `#D6FE39` is the only accent.
+
+- [ ] Home, idle: cream or dark background, "FAMILY SHIELD" eyebrow, greeting, ink hero with a waveform and one lime "check a message" button, family initials, one recent check, tabs 홈 / 확인 기록 / 가족
+- [ ] Home, live: the same hero slot becomes the open case (child, amount when the list has `request_amount`, countdown from `deadline_at`, push / biometric / call). No second banner above it
+- [ ] Progress: 64 pt countdown while waiting on the push, three steps, "don't send money yet". No play button unless the voice file is still on this phone. No server copy of the audio
+- [ ] Result, scam and confirmed: full ink screen. The child's 예 / 아니요 is the hero (lime for confirmed, `#FF9991` for no). Yellow stays "not confirmed" and is not green or red. Share opens the system sheet
+- [ ] History: decided cases grouped by day, filters 전체 / 확인됨 / 사기 의심 / 확인 안 됨. An open case is not repeated here
+- [ ] Family: parent card, children with initials and last four digits, lime "add a child". No online status
+- [ ] Child answer: who asked (`asker_display_name`) and the amount (`request_amount`) only when the API sent them. Otherwise the fixed question and no invented "mom". Choose 예 or 아니요, then Face ID or BiometricPrompt. Close does not answer. The call code stays hidden until biometrics, and only while the case is `calling`
+- [ ] Share a voice note: the local file and the child are on one screen. Nothing uploads until the parent confirms. The caption says nothing is sent yet
+- [ ] Dark mode uses the dark tokens. Lime text is not placed on the cream background
+- [ ] Large text still scrolls. Status is not color alone

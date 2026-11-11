@@ -11,10 +11,10 @@ Readings, where the task text allows more than one:
 - The case list is for an active parent of that family only. Anyone else,
   including an invited parent, a child of that family, and a parent of
   another family, gets 404 `not_found`, the same answer as an unknown id.
-- The list is a summary: id, child, state, result, color, created and
-  decided times, newest first. The suspicious text, transcript, claims,
-  pattern, timeline, phone, codes, and nonces stay on `GET /v1/cases/{id}`
-  or nowhere.
+- The list is a summary: id, child, state, result, color, the claimed
+  amount string or null, created and decided times, newest first. The
+  suspicious text, transcript, claims object, pattern, timeline, phone,
+  codes, and nonces stay on `GET /v1/cases/{id}` or nowhere.
 - `limit` defaults to 20 and must be 1..50. Outside that, or not an
   integer, is 400 `invalid_body` (the request-validation answer), not a
   silent clamp.
@@ -49,6 +49,7 @@ CASE_KEYS = {
     "state",
     "result",
     "color",
+    "request_amount",
     "created_at",
     "decided_at",
 }

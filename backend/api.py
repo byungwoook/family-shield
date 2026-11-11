@@ -165,6 +165,7 @@ from backend.store import (
     confirm_phone_change,
     consume_signin_nonce,
     family_cases,
+    opener_display_name,
     issue_signin_nonce,
     user_memberships,
     family_push_targets,
@@ -486,19 +487,52 @@ CHILD_CASE_KEYS = (
     "created_at",
     "updated_at",
     "decided_at",
+    "asker_display_name",
+    "request_amount",
 )
+_REQUEST_AMOUNT_LIMIT = 80
 
 
-def child_case(body: dict) -> dict:
+def request_amount(claims) -> str | None:
+    """The amount string from analysis, or None.
+
+    Blank and `unknown` are missing. Identity, story, and red flags are
+    not returned: a name in the message must not be shown as the parent.
+    The string is the message's claim, not a verified transfer.
+    """
+    if not isinstance(claims, dict):
+        return None
+    raw = claims.get("amount")
+    if not isinstance(raw, str):
+        return None
+    text = raw.strip()
+    if not text or text.casefold() == "unknown":
+        return None
+    return text[:_REQUEST_AMOUNT_LIMIT]
+
+
+def child_case(
+    body: dict,
+    *,
+    asker_display_name: str | None = None,
+    amount: str | None = None,
+) -> dict:
     """What the child's session sees: whether a question is open, and the outcome.
 
     The question is the fixed `money_request`. The parent's text, the
-    transcript, the claims, the pattern, the timeline, and the number are
-    left out: they come from the suspicious message, and the child answers
-    the same fixed question on every case, in the app or on the call.
+    transcript, the claims object, the pattern, the timeline, and the
+    number are left out. `asker_display_name` is the parent membership
+    that opened the case. `request_amount` is only the amount claim.
     """
-    view = {key: body.get(key) for key in CHILD_CASE_KEYS if key != "kind"}
+    view = {
+        key: body.get(key)
+        for key in CHILD_CASE_KEYS
+        if key not in {"kind", "asker_display_name", "request_amount"}
+    }
     view["kind"] = "money_request"
+    name = asker_display_name.strip() if isinstance(asker_display_name, str) else ""
+    view["asker_display_name"] = name or None
+    view["request_amount"] = amount if isinstance(amount, str) and amount else None
     return {key: view[key] for key in CHILD_CASE_KEYS}
 
 
@@ -805,7 +839,14 @@ def create_app(
         body = public_case(view, child_name=name, phone_last4=last4)
         body["gather"] = gather_for(view)
         if role == "child":
-            return child_case(body)
+            asker = opener_display_name(
+                conn, user_id=view.get("opened_by"), family_id=view.get("family_id")
+            )
+            return child_case(
+                body,
+                asker_display_name=asker,
+                amount=request_amount(view.get("claims")),
+            )
         return body
 
     def _visible(conn, user_id, view) -> str:
@@ -1676,6 +1717,7 @@ def create_app(
                 "state": row["state"],
                 "result": row["result"],
                 "color": color_of(row["state"]),
+                "request_amount": request_amount(row.get("claims")),
                 "created_at": _iso(row["created_at"]),
                 "decided_at": _iso(row["decided_at"]),
             }

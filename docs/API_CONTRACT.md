@@ -453,9 +453,14 @@ Never present: codes, nonces, hashes, full phone numbers, audio.
 
 ### Child body (`CHILD_CASE_KEYS`)
 
-`id`, `child_member_id`, `kind` (always `"money_request"`), `state`, `result`, `color`, `answered_via`, `code_channel`, `gather`, `deadline_at`, `created_at`, `updated_at`, `decided_at`.
+`id`, `child_member_id`, `kind` (always `"money_request"`), `state`, `result`, `color`, `answered_via`, `code_channel`, `gather`, `deadline_at`, `created_at`, `updated_at`, `decided_at`, `asker_display_name`, `request_amount`.
 
-The child never sees the parent's text, transcript, claims, pattern, timeline, phone, or names. The question is always the fixed money-request question ("Did you send your family a message asking for money?"), localized on the device.
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `asker_display_name` | string \| null | Display name of the parent membership that opened the case. Null when that row is gone or the name is blank. This is the account in the family, never a name taken from the message. |
+| `request_amount` | string \| null | `claims.amount` when that string is non-blank and not `unknown` (trimmed, at most 80 characters). Otherwise null. It is the message's claim, not a verified transfer. The rest of `claims` is not included. |
+
+The child never sees the parent's text, transcript, the claims object, claimed identity, story, red flags, pattern, timeline, phone, or the child's own name. The question stays the fixed money-request question ("Did you send your family a message asking for money?"), localized on the device. A screen may add the asker and the amount around that question, and hides either line when the field is null.
 
 ### States
 
@@ -544,7 +549,7 @@ Family-level events (`child_invited`, `invite_reissued`, `invite_accepted`, `pho
 - After `POST /v1/cases`, poll `GET /v1/cases/{id}` every few seconds (2–3 s is reasonable; there is no websocket or push to the parent for case progress) until `color != "open"` (equivalently `decided_at != null`).
 - `deadline_at` tells the UI how long the current step can take; a whole case takes at most about 90 + 180 + 45 s plus timer lag.
 - `transcript`, `claims`, `pattern_id` are filled asynchronously and can arrive before or after the case is decided. There is no field that says analysis finished; a parent screen that wants them may poll a little longer after a voice-note case or refresh on open.
-- The family list (`GET /v1/families/{id}/cases`) is a summary for the home screen: `{family_id, cases:[{id, child_member_id, child_display_name, state, result, color, created_at, decided_at}]}`, newest first, `limit` 1..50 (default 20; out of range is `400 invalid_body`), no pagination cursor.
+- The family list (`GET /v1/families/{id}/cases`) is a summary for the home screen: `{family_id, cases:[{id, child_member_id, child_display_name, state, result, color, request_amount, created_at, decided_at}]}`, newest first, `limit` 1..50 (default 20; out of range is `400 invalid_body`), no pagination cursor. `request_amount` is the same amount string as on the child body, or null. The list does not include the claims object, transcript, or parent text.
 
 ## 7. Flows
 
