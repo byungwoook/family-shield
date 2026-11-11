@@ -549,7 +549,7 @@ Family-level events (`child_invited`, `invite_reissued`, `invite_accepted`, `pho
 - After `POST /v1/cases`, poll `GET /v1/cases/{id}` every few seconds (2–3 s is reasonable; there is no websocket or push to the parent for case progress) until `color != "open"` (equivalently `decided_at != null`).
 - `deadline_at` tells the UI how long the current step can take; a whole case takes at most about 90 + 180 + 45 s plus timer lag.
 - `transcript`, `claims`, `pattern_id` are filled asynchronously and can arrive before or after the case is decided. There is no field that says analysis finished; a parent screen that wants them may poll a little longer after a voice-note case or refresh on open.
-- The family list (`GET /v1/families/{id}/cases`) is a summary for the home screen: `{family_id, cases:[{id, child_member_id, child_display_name, state, result, color, request_amount, created_at, decided_at}]}`, newest first, `limit` 1..50 (default 20; out of range is `400 invalid_body`), no pagination cursor. `request_amount` is the same amount string as on the child body, or null. The list does not include the claims object, transcript, or parent text.
+- The family list (`GET /v1/families/{id}/cases`) is a summary for the home screen: `{family_id, cases:[{id, child_member_id, child_display_name, state, result, color, request_amount, deadline_at, created_at, decided_at}]}`, newest first, `limit` 1..50 (default 20; out of range is `400 invalid_body`), no pagination cursor. `request_amount` is the same amount string as on the child body, or null. `deadline_at` is the current wait window, or null when the case is terminal or still `opened`. The list does not include the claims object, transcript, or parent text.
 
 ## 7. Flows
 

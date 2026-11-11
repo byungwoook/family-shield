@@ -1718,6 +1718,7 @@ def create_app(
                 "result": row["result"],
                 "color": color_of(row["state"]),
                 "request_amount": request_amount(row.get("claims")),
+                "deadline_at": _iso(row["deadline_at"]),
                 "created_at": _iso(row["created_at"]),
                 "decided_at": _iso(row["decided_at"]),
             }

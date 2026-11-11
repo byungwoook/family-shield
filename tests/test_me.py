@@ -12,7 +12,8 @@ Readings, where the task text allows more than one:
   including an invited parent, a child of that family, and a parent of
   another family, gets 404 `not_found`, the same answer as an unknown id.
 - The list is a summary: id, child, state, result, color, the claimed
-  amount string or null, created and decided times, newest first. The
+  amount string or null, the current deadline or null, created and decided
+  times, newest first. The
   suspicious text, transcript, claims object, pattern, timeline, phone,
   codes, and nonces stay on `GET /v1/cases/{id}` or nowhere.
 - `limit` defaults to 20 and must be 1..50. Outside that, or not an
@@ -50,6 +51,7 @@ CASE_KEYS = {
     "result",
     "color",
     "request_amount",
+    "deadline_at",
     "created_at",
     "decided_at",
 }

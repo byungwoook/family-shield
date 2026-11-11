@@ -605,7 +605,7 @@ def family_cases(conn, family_id: UUID, *, limit: int) -> list:
         """
         SELECT
             c.id, c.child_member_id, m.display_name AS child_display_name,
-            c.state, c.result, c.claims, c.created_at, c.decided_at
+            c.state, c.result, c.claims, c.deadline_at, c.created_at, c.decided_at
         FROM cases AS c
         JOIN family_members AS m ON m.id = c.child_member_id
         WHERE c.family_id = %s
