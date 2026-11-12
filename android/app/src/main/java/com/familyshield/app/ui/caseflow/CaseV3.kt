@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -256,7 +257,16 @@ fun ResultScreen(case: ParentCase, color: CaseColor, onBack: () -> Unit) {
             }
         }
         Column(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)).background(palette.sheet).padding(horizontal = 20.dp, vertical = 20.dp).testTag("result_card"),
+            Modifier
+                .padding(horizontal = 20.dp)
+                .navigationBarsPadding()
+                .padding(bottom = 20.dp)
+                .heightIn(max = 520.dp)
+                .clip(RoundedCornerShape(24.dp))
+                .background(palette.sheet)
+                .verticalScroll(rememberScrollState())
+                .padding(20.dp)
+                .testTag("result_card"),
         ) {
             val sheetTitle = if (confirmed) stringResource(R.string.v3_sheet_yes) else stringResource(R.string.v3_sheet_scam)
             val shortLine = if (confirmed) {
@@ -312,8 +322,9 @@ fun ResultScreen(case: ParentCase, color: CaseColor, onBack: () -> Unit) {
                 InkButton(
                     label = stringResource(R.string.v3_share),
                     onClick = { shareText(context, context.getString(R.string.family_alert_share_title), message) },
-                    background = palette.sheetText,
-                    foreground = palette.sheet,
+                    // Light: cream #F3F0E9 on #B83232 is 5.21:1. Dark: ink #0D1015 on #FF9991 is 9.27:1.
+                    background = palette.red,
+                    foreground = if (palette.isDark) palette.ink else ResultCream,
                     modifier = Modifier.padding(top = 8.dp),
                 )
             }
