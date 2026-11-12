@@ -662,17 +662,23 @@ struct V3CaseBody: View {
             .frame(minHeight: 44, alignment: .leading)
             .accessibilityIdentifier("result_details")
             if detailsOpen {
-                if !view.body.isEmpty {
-                    Text(view.body).font(Theme.font(15)).foregroundStyle(FsPalette.muted(scheme)).accessibilityIdentifier("result_body")
-                }
-                if !confirmed {
-                    if let alert = view.familyAlert {
-                        Text(CopyCatalog.text(.familyAlertHeading, locale)).font(Theme.font(16, weight: .semibold))
-                        Text(alert).font(Theme.font(15)).accessibilityIdentifier("family_alert")
-                        Button(CopyCatalog.text(.actionCopy, locale)) { onCopy(alert) }
-                            .accessibilityIdentifier("alert_copy")
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 8) {
+                        if !view.body.isEmpty {
+                            Text(view.body).font(Theme.font(15)).foregroundStyle(FsPalette.muted(scheme)).accessibilityIdentifier("result_body")
+                        }
+                        if !confirmed {
+                            if let alert = view.familyAlert {
+                                Text(CopyCatalog.text(.familyAlertHeading, locale)).font(Theme.font(16, weight: .semibold))
+                                Text(alert).font(Theme.font(15)).accessibilityIdentifier("family_alert")
+                                Button(CopyCatalog.text(.actionCopy, locale)) { onCopy(alert) }
+                                    .accessibilityIdentifier("alert_copy")
+                            }
+                        }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .frame(maxHeight: 240)
             }
             if confirmed {
                 Button(CopyCatalog.text(.v3Done, locale), action: onBack)
@@ -681,16 +687,21 @@ struct V3CaseBody: View {
                     .foregroundStyle(Theme.ink)
                     .frame(maxWidth: .infinity)
             } else if view.familyAlert != nil {
-                Button(CopyCatalog.text(.v3Share, locale)) { if let alert = view.familyAlert { onShare(alert) } }
-                    .buttonStyle(.borderedProminent)
-                    .tint(FsPalette.text(scheme))
-                    .foregroundStyle(FsPalette.bg(scheme))
-                    .frame(maxWidth: .infinity)
+                Button { if let alert = view.familyAlert { onShare(alert) } } label: {
+                    Text(CopyCatalog.text(.v3Share, locale))
+                        .font(Theme.font(17, weight: .semibold))
+                        .foregroundStyle(scheme == .dark ? Theme.ink : Theme.cream)
+                        .frame(maxWidth: .infinity, minHeight: 56)
+                        .background(FsPalette.red(scheme), in: RoundedRectangle(cornerRadius: 16))
+                }
+                .buttonStyle(.plain)
             }
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(FsPalette.sheet(scheme), in: RoundedRectangle(cornerRadius: 28))
+        .background(FsPalette.sheet(scheme), in: RoundedRectangle(cornerRadius: 24))
+        .padding(.horizontal, 20)
+        .padding(.bottom, 20)
         .accessibilityIdentifier("result_card")
     }
 
