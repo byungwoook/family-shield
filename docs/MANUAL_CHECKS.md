@@ -216,10 +216,10 @@ Compare the parent and child screens with `docs/design/v3/` on a phone-sized win
 - [ ] Home, idle: cream or dark background, "FAMILY SHIELD" eyebrow, greeting, ink hero with a waveform and one lime "check a message" button, family initials, one recent check, tabs 홈 / 확인 기록 / 가족
 - [ ] Home, live: the same hero slot becomes the open case (child, amount when the list has `request_amount`, countdown from `deadline_at`, push / biometric / call). No second banner above it
 - [ ] Progress: 64 pt countdown while waiting on the push, three steps, "don't send money yet". No play button unless the voice file is still on this phone. No server copy of the audio
-- [ ] Result, scam and confirmed: full ink screen. The child's 예 / 아니요 is the hero (lime for confirmed, `#FF9991` for no). Yellow stays "not confirmed" and is not green or red. Share opens the system sheet
+- [ ] Result, scam and confirmed: full ink screen. The child's 예 / 아니요 is the hero (lime for confirmed, `#FF9991` for no). The bottom sheet is the short mockup line and one button. "자세히 보기" starts collapsed and opens the longer safety text in place. Yellow stays "not confirmed" and is not green or red. Share opens the system sheet
 - [ ] History: decided cases grouped by day, filters 전체 / 확인됨 / 사기 의심 / 확인 안 됨. An open case is not repeated here
-- [ ] Family: parent card, children with initials and last four digits, lime "add a child". No online status
+- [ ] Family: parent card, children with initials and last four digits, one add action. Confirm, verify, and a new invite are on the child's detail, not extra buttons on the list. No online status
 - [ ] Child answer: who asked (`asker_display_name`) and the amount (`request_amount`) only when the API sent them. Otherwise the fixed question and no invented "mom". Choose 예 or 아니요, then Face ID or BiometricPrompt. Close does not answer. The call code stays hidden until biometrics, and only while the case is `calling`
-- [ ] Share a voice note: the local file and the child are on one screen. Nothing uploads until the parent confirms. The caption says nothing is sent yet
+- [ ] Share a voice note: the local file, the child, one caption, and one button. Nothing uploads until the parent confirms. No extra explanation above the file
 - [ ] Dark mode uses the dark tokens. Lime text is not placed on the cream background
 - [ ] Large text still scrolls. Status is not color alone
