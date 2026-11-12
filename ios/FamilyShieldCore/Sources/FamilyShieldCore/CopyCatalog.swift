@@ -347,6 +347,9 @@ public enum CopyKey: String, CaseIterable, Sendable {
     case childAmountLabel = "child_amount_label"
     case childAmountSource = "child_amount_source"
     case childSubmitFace = "child_submit_face"
+    case v3SheetScamLine = "v3_sheet_scam_line"
+    case v3Details = "v3_details"
+    case v3DetailsHide = "v3_details_hide"
 }
 
 public enum AppLocale: String, Sendable, Equatable {
@@ -1560,5 +1563,8 @@ public enum CopyCatalog {
         .childAmountLabel: [.en: "Amount in the request", .ko: "요청 금액"],
         .childAmountSource: [.en: "From a voice message", .ko: "음성 메시지로 받은 요청"],
         .childSubmitFace: [.en: "Confirm with Face ID and send", .ko: "Face ID로 답변 보내기"],
+        .v3SheetScamLine: [.en: "Do not send money or reply.", .ko: "돈을 보내거나 답장하지 마세요."],
+        .v3Details: [.en: "See details", .ko: "자세히 보기"],
+        .v3DetailsHide: [.en: "Hide details", .ko: "접기"],
     ]
 }

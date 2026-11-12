@@ -114,6 +114,7 @@ struct V3ParentHome: View {
     var onChild: (ChildAction, ChildCardState) -> Void
     @Environment(\.colorScheme) private var scheme
     @State private var tab = 0
+    @State private var openChildId: String?
     private var locale: AppLocale { AppLocale.resolve() }
 
     var body: some View {
@@ -126,7 +127,7 @@ struct V3ParentHome: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            if tab == 2 {
+            if tab == 2 && openChildId == nil {
                 Button(CopyCatalog.text(.familyAddChild, locale)) {
                     model.addName = ""
                     model.addPhone = ""
@@ -276,6 +277,16 @@ struct V3ParentHome: View {
     }
 
     private var family: some View {
+        Group {
+            if let child = model.home.children.first(where: { $0.id == openChildId }) {
+                familyDetail(child)
+            } else {
+                familyList
+            }
+        }
+    }
+
+    private var familyList: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 brand
@@ -293,14 +304,28 @@ struct V3ParentHome: View {
                 .padding(16)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(FsPalette.surface(scheme), in: RoundedRectangle(cornerRadius: 24))
-                Text(CopyCatalog.text(.familyChildCount, locale, model.home.children.count))
-                    .font(Theme.font(20, weight: .semibold))
+                HStack {
+                    Text(CopyCatalog.text(.familyChildCount, locale, model.home.children.count))
+                        .font(Theme.font(20, weight: .semibold))
+                    Spacer()
+                    Button(CopyCatalog.text(.familyInviteLink, locale)) {
+                        model.addName = ""
+                        model.addPhone = ""
+                        model.addByPhone = false
+                        model.showAdd = true
+                    }
+                    .font(Theme.font(15))
+                    .foregroundStyle(FsPalette.muted(scheme))
+                }
                 if model.home.isEmpty {
                     Text(CopyCatalog.text(.familyEmptyTitle, locale)).accessibilityIdentifier("family_empty")
                 } else {
                     VStack(spacing: 0) {
                         ForEach(model.home.children) { child in
-                            ChildCard(child: child, busy: model.busy) { action in onChild(action, child) }
+                            familyRow(child)
+                            if child.id != model.home.children.last?.id {
+                                Divider().padding(.leading, 76)
+                            }
                         }
                     }
                     .background(FsPalette.surface(scheme), in: RoundedRectangle(cornerRadius: 24))
@@ -308,6 +333,48 @@ struct V3ParentHome: View {
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 16)
+        }
+    }
+
+    private func familyRow(_ child: ChildCardState) -> some View {
+        let last4 = model.members.first { $0.id == child.id }?.phoneLast4
+        return Button { openChildId = child.id } label: {
+            HStack(spacing: 12) {
+                InitialAvatar(name: child.name, size: 48, background: FsPalette.avatar(scheme), foreground: FsPalette.text(scheme))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(child.name).font(Theme.font(17, weight: .semibold)).foregroundStyle(FsPalette.text(scheme))
+                    if child.canVerify {
+                        Text(CopyCatalog.text(.familyCanCheck, locale)).font(Theme.font(14)).foregroundStyle(FsPalette.muted(scheme))
+                    }
+                    if let last4, !last4.isEmpty {
+                        Text(CopyCatalog.text(.familyNumberEnding, locale, last4)).font(Theme.font(14)).foregroundStyle(FsPalette.muted(scheme))
+                    }
+                }
+                Spacer()
+                Image(systemName: "chevron.right").foregroundStyle(FsPalette.muted(scheme))
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("child_\(child.id)")
+    }
+
+    private func familyDetail(_ child: ChildCardState) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack {
+                    Button { openChildId = nil } label: {
+                        Image(systemName: "chevron.left").frame(width: 44, height: 44)
+                    }
+                    .accessibilityIdentifier("back")
+                    Text(child.name).font(Theme.font(17, weight: .semibold)).frame(maxWidth: .infinity)
+                    Color.clear.frame(width: 44, height: 44)
+                }
+                ChildCard(child: child, busy: model.busy) { action in onChild(action, child) }
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 24)
         }
     }
 
@@ -473,6 +540,7 @@ struct V3CaseBody: View {
     var onCopy: (String) -> Void
     var onShare: (String) -> Void
     @Environment(\.colorScheme) private var scheme
+    @State private var detailsOpen = false
     private var locale: AppLocale { AppLocale.resolve() }
 
     var body: some View {
@@ -538,67 +606,92 @@ struct V3CaseBody: View {
         let subject = V3Format.subject(view.name, korean: locale == .ko)
         let headline = CopyCatalog.text(confirmed ? .v3HeadlineYes : .v3HeadlineNo, locale, subject)
         let bubble = confirmed ? Theme.accent : FsPalette.answerNo
-        return ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                nav(CopyCatalog.text(.v3ResultNav, locale), ink: true)
-                Text(CopyCatalog.text(.v3Direct, locale))
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    .foregroundStyle(FsPalette.heroMuted)
-                HStack(alignment: .center, spacing: 12) {
-                    VStack {
-                        InitialAvatar(name: view.name, size: 72, background: Color(red: 228 / 255, green: 225 / 255, blue: 216 / 255), foreground: Theme.ink)
-                        Text(view.name).font(Theme.font(14)).foregroundStyle(Theme.cream)
+        return VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    nav(CopyCatalog.text(.v3ResultNav, locale), ink: true)
+                    Text(CopyCatalog.text(.v3Direct, locale))
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundStyle(FsPalette.heroMuted)
+                    HStack(alignment: .center, spacing: 12) {
+                        VStack {
+                            InitialAvatar(name: view.name, size: 72, background: Color(red: 228 / 255, green: 225 / 255, blue: 216 / 255), foreground: Theme.ink)
+                            Text(view.name).font(Theme.font(14)).foregroundStyle(Theme.cream)
+                        }
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(CopyCatalog.text(.v3AnswerCaption, locale)).font(Theme.font(12)).foregroundStyle(Theme.ink)
+                            Text(CopyCatalog.text(confirmed ? .childYes : .childNo, locale))
+                                .font(Theme.font(38, weight: .bold))
+                                .foregroundStyle(Theme.ink)
+                            Text(CopyCatalog.text(confirmed ? .v3YesDetail : .v3NoDetail, locale))
+                                .font(Theme.font(14))
+                                .foregroundStyle(Theme.ink)
+                        }
+                        .padding(16)
+                        .background(bubble, in: RoundedRectangle(cornerRadius: 18))
                     }
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(CopyCatalog.text(.v3AnswerCaption, locale)).font(Theme.font(12)).foregroundStyle(Theme.ink)
-                        Text(CopyCatalog.text(confirmed ? .childYes : .childNo, locale))
-                            .font(Theme.font(38, weight: .bold))
-                            .foregroundStyle(Theme.ink)
-                        Text(CopyCatalog.text(confirmed ? .v3YesDetail : .v3NoDetail, locale))
-                            .font(Theme.font(14))
-                            .foregroundStyle(Theme.ink)
-                    }
-                    .padding(16)
-                    .background(bubble, in: RoundedRectangle(cornerRadius: 18))
+                    Text(headline).font(Theme.font(32, weight: .bold)).foregroundStyle(Theme.cream)
                 }
-                Text(headline).font(Theme.font(32, weight: .bold)).foregroundStyle(Theme.cream)
+                .padding(20)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            sheet(confirmed: confirmed)
+        }
+        .background(Theme.ink)
+        .accessibilityIdentifier("case_screen")
+    }
+
+    private func sheet(confirmed: Bool) -> some View {
+        let shortLine = confirmed
+            ? CopyCatalog.text(.v3SheetYesBody, locale, view.name)
+            : CopyCatalog.text(.v3SheetScamLine, locale)
+        return VStack(alignment: .leading, spacing: 8) {
+            Text(CopyCatalog.text(confirmed ? .v3SheetYes : .v3SheetScam, locale))
+                .font(Theme.font(20, weight: .bold))
+                .foregroundStyle(FsPalette.text(scheme))
+                .accessibilityIdentifier("result_title")
+            Text(shortLine)
+                .font(Theme.font(15))
+                .foregroundStyle(FsPalette.muted(scheme))
+            Button(CopyCatalog.text(detailsOpen ? .v3DetailsHide : .v3Details, locale)) {
+                detailsOpen.toggle()
+            }
+            .font(Theme.font(15, weight: .medium))
+            .foregroundStyle(FsPalette.text(scheme))
+            .frame(minHeight: 44, alignment: .leading)
+            .accessibilityIdentifier("result_details")
+            if detailsOpen {
                 if !view.body.isEmpty {
-                    Text(view.body).font(Theme.font(15)).foregroundStyle(Theme.cream).accessibilityIdentifier("result_body")
+                    Text(view.body).font(Theme.font(15)).foregroundStyle(FsPalette.muted(scheme)).accessibilityIdentifier("result_body")
                 }
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(CopyCatalog.text(confirmed ? .v3SheetYes : .v3SheetScam, locale))
-                        .font(Theme.font(20, weight: .bold))
-                        .foregroundStyle(FsPalette.text(scheme))
-                        .accessibilityIdentifier("result_title")
-                    if confirmed {
-                        Text(CopyCatalog.text(.v3SheetYesBody, locale, view.name))
-                            .foregroundStyle(FsPalette.muted(scheme))
-                        Button(CopyCatalog.text(.v3Done, locale), action: onBack)
-                            .buttonStyle(.borderedProminent)
-                            .tint(Theme.accent)
-                            .foregroundStyle(Theme.ink)
-                            .frame(maxWidth: .infinity)
-                    } else if let alert = view.familyAlert {
+                if !confirmed {
+                    if let alert = view.familyAlert {
                         Text(CopyCatalog.text(.familyAlertHeading, locale)).font(Theme.font(16, weight: .semibold))
                         Text(alert).font(Theme.font(15)).accessibilityIdentifier("family_alert")
-                        Button(CopyCatalog.text(.v3Share, locale)) { onShare(alert) }
-                            .buttonStyle(.borderedProminent)
-                            .tint(FsPalette.text(scheme))
-                            .foregroundStyle(FsPalette.bg(scheme))
-                            .frame(maxWidth: .infinity)
                         Button(CopyCatalog.text(.actionCopy, locale)) { onCopy(alert) }
                             .accessibilityIdentifier("alert_copy")
                     }
                 }
-                .padding(20)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(FsPalette.sheet(scheme), in: RoundedRectangle(cornerRadius: 28))
-                .accessibilityIdentifier("result_card")
             }
-            .padding(20)
+            if confirmed {
+                Button(CopyCatalog.text(.v3Done, locale), action: onBack)
+                    .buttonStyle(.borderedProminent)
+                    .tint(Theme.accent)
+                    .foregroundStyle(Theme.ink)
+                    .frame(maxWidth: .infinity)
+            } else if view.familyAlert != nil {
+                Button(CopyCatalog.text(.v3Share, locale)) { if let alert = view.familyAlert { onShare(alert) } }
+                    .buttonStyle(.borderedProminent)
+                    .tint(FsPalette.text(scheme))
+                    .foregroundStyle(FsPalette.bg(scheme))
+                    .frame(maxWidth: .infinity)
+            }
         }
-        .background(Theme.ink)
-        .accessibilityIdentifier("case_screen")
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(FsPalette.sheet(scheme), in: RoundedRectangle(cornerRadius: 28))
+        .accessibilityIdentifier("result_card")
     }
 
     private var yellow: some View {
