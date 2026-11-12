@@ -27,7 +27,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -237,20 +246,29 @@ fun ResultScreen(case: ParentCase, color: CaseColor, onBack: () -> Unit) {
                 .padding(horizontal = 20.dp),
         ) {
             Text(stringResource(R.string.v3_direct), color = palette.heroMuted, fontFamily = FontFamily.Monospace, fontSize = 12.sp, letterSpacing = 0.6.sp, modifier = Modifier.padding(top = 12.dp))
-            Row(Modifier.padding(top = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Row(
+                Modifier.fillMaxWidth().padding(top = 16.dp, start = 15.dp, end = 15.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(72.dp)) {
                     InitialAvatar(name, size = 72.dp, background = AvatarOnInk, foreground = ResultInk)
                     Text(name, color = ResultCream, fontFamily = Pretendard, fontSize = 14.sp, modifier = Modifier.padding(top = 6.dp))
                 }
                 Column(
-                    Modifier.padding(start = 12.dp).clip(RoundedCornerShape(18.dp)).background(bubble).padding(horizontal = 16.dp, vertical = 12.dp),
+                    Modifier
+                        .padding(start = 16.dp)
+                        .weight(1f)
+                        .heightIn(min = 128.dp)
+                        .background(bubble, AnswerBubbleShape())
+                        .padding(start = 30.dp, end = 20.dp, top = 16.dp, bottom = 16.dp),
+                    horizontalAlignment = Alignment.Start,
                 ) {
-                    Text(stringResource(R.string.v3_answer_caption), color = ResultInk, fontFamily = Pretendard, fontSize = 12.sp)
+                    Text(stringResource(R.string.v3_answer_caption), color = ResultInk, fontFamily = Pretendard, fontWeight = FontWeight(500), fontSize = 12.sp, lineHeight = 18.sp)
                     Text(word, color = ResultInk, fontFamily = Pretendard, fontWeight = FontWeight(700), fontSize = 38.sp, lineHeight = 46.sp)
-                    Text(detail, color = ResultInk, fontFamily = Pretendard, fontSize = 14.sp)
+                    Text(detail, color = ResultInk, fontFamily = Pretendard, fontSize = 14.sp, lineHeight = 21.sp)
                 }
             }
-            Text(headline, color = ResultCream, fontFamily = Pretendard, fontWeight = FontWeight(700), fontSize = 32.sp, lineHeight = 40.sp, modifier = Modifier.padding(top = 28.dp))
+            Text(headline, color = ResultCream, fontFamily = Pretendard, fontWeight = FontWeight(700), fontSize = 38.sp, lineHeight = 46.sp, modifier = Modifier.padding(top = 28.dp))
             Row(Modifier.fillMaxWidth().padding(top = 12.dp)) {
                 amount?.let { Text(stringResource(R.string.home_amount_line, it), color = palette.heroMuted, fontFamily = Pretendard, fontSize = 14.sp, modifier = Modifier.weight(1f)) }
                 if (whenLabel.isNotBlank()) Text(whenLabel, color = palette.heroMuted, fontFamily = Pretendard, fontSize = 14.sp)
@@ -322,9 +340,9 @@ fun ResultScreen(case: ParentCase, color: CaseColor, onBack: () -> Unit) {
                 InkButton(
                     label = stringResource(R.string.v3_share),
                     onClick = { shareText(context, context.getString(R.string.family_alert_share_title), message) },
-                    // Light: cream #F3F0E9 on #B83232 is 5.21:1. Dark: ink #0D1015 on #FF9991 is 9.27:1.
-                    background = palette.red,
-                    foreground = if (palette.isDark) palette.ink else ResultCream,
+                    // Same #FF9991 and ink as the 아니요 bubble, in both themes. Contrast is 9.27:1.
+                    background = palette.answerNo,
+                    foreground = palette.ink,
                     modifier = Modifier.padding(top = 8.dp),
                 )
             }
@@ -347,6 +365,28 @@ fun YellowScreen(case: ParentCase, onBack: () -> Unit) {
         if (copy != null) {
             Text(stringResource(copy.body, name, whenLabel), color = palette.text, fontFamily = Pretendard, fontSize = 17.sp, modifier = Modifier.padding(top = 12.dp).testTag("result_body"))
         }
+    }
+}
+
+/** Rounded answer bubble with a short tail toward the avatar. Body radius 22pt, tail about 10pt. */
+private class AnswerBubbleShape : Shape {
+    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline {
+        val tail = with(density) { 10.dp.toPx() }
+        val radius = with(density) { 22.dp.toPx() }
+        val path = Path().apply {
+            addRoundRect(
+                RoundRect(
+                    Rect(tail, 0f, size.width, size.height),
+                    CornerRadius(radius),
+                ),
+            )
+            val cy = size.height / 2f
+            moveTo(tail, cy - tail * 0.9f)
+            lineTo(0f, cy)
+            lineTo(tail, cy + tail * 0.75f)
+            close()
+        }
+        return Outline.Generic(path)
     }
 }
 

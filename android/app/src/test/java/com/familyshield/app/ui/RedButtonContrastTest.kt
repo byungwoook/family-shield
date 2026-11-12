@@ -7,13 +7,11 @@ import kotlin.math.pow
 /** Locks the scam-share button pairs at WCAG AA for normal text (4.5:1). */
 class RedButtonContrastTest {
     @Test
-    fun scamShareButtonMeetsAa() {
-        // Light sheet uses the light red token with cream text.
-        val light = contrast("#F3F0E9", "#B83232")
-        // Dark sheet uses the dark red token with ink text. Cream on that red is only 1.81:1.
-        val dark = contrast("#0D1015", "#FF9991")
-        assertTrue("light cream on #B83232 was $light", light >= 4.5)
-        assertTrue("dark ink on #FF9991 was $dark", dark >= 4.5)
+    fun scamShareButtonMatchesTheAnswerBubble() {
+        // Both modes use the answer-bubble red #FF9991 with ink #0D1015.
+        val ratio = contrast("#0D1015", "#FF9991")
+        assertTrue("ink on #FF9991 was $ratio", ratio >= 4.5)
+        assertTrue("expected about 9.27:1, was $ratio", ratio > 9.0)
     }
 
     private fun contrast(foreground: String, background: String): Double {

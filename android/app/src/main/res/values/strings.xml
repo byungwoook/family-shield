@@ -320,8 +320,8 @@
     <string name="v3_headline_yes">This request matches\nwhat %1$s sent</string>
     <string name="v3_sheet_scam">This may be a scam</string>
     <string name="v3_sheet_yes">Talk before you send</string>
-    <string name="v3_sheet_yes_body">Contact %1$s directly and check the request once more.</string>
-    <string name="v3_sheet_scam_line">Do not send money or reply.</string>
+    <string name="v3_sheet_yes_body">Contact %1$s directly and\ncheck the request once more.</string>
+    <string name="v3_sheet_scam_line">Do not send money\nor reply.</string>
     <string name="v3_details">See details</string>
     <string name="v3_details_hide">Hide details</string>
     <string name="v3_done">Done checking</string>

@@ -16,6 +16,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.ExperimentalTextApi
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.LineBreak
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontVariation
@@ -119,6 +120,8 @@ private fun fs(size: Int, line: Int, weight: Int, tracking: Float = -0.35f) = Te
     fontSize = size.sp,
     lineHeight = line.sp,
     letterSpacing = tracking.sp,
+    // Phrase keeps Korean words whole, so a particle like 요. is not left alone.
+    lineBreak = LineBreak.Paragraph.copy(wordBreak = LineBreak.WordBreak.Phrase),
 )
 
 private val FsTypography = Typography(

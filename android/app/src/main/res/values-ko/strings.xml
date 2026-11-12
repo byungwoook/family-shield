@@ -320,8 +320,8 @@
     <string name="v3_headline_yes">%1$s 보낸\n요청이 맞아요</string>
     <string name="v3_sheet_scam">사기가 의심돼요</string>
     <string name="v3_sheet_yes">보내기 전, 직접 이야기하세요</string>
-    <string name="v3_sheet_yes_body">%1$s에게 직접 연락해 요청 내용을 한 번 더 확인하세요.</string>
-    <string name="v3_sheet_scam_line">돈을 보내거나 답장하지 마세요.</string>
+    <string name="v3_sheet_yes_body">%1$s에게 직접 연락해\n요청 내용을 한 번 더 확인하세요.</string>
+    <string name="v3_sheet_scam_line">돈을 보내거나\n답장하지 마세요.</string>
     <string name="v3_details">자세히 보기</string>
     <string name="v3_details_hide">접기</string>
     <string name="v3_done">확인 완료</string>
