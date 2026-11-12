@@ -95,6 +95,7 @@ fun ParentShell(
 ) {
     val palette = LocalFsPalette.current
     var tab by rememberSaveable { mutableStateOf(initialTab) }
+    var openChildId by rememberSaveable { mutableStateOf<String?>(null) }
     var clock by remember { mutableStateOf(now) }
     LaunchedEffect(ticking) {
         if (!ticking) return@LaunchedEffect
@@ -139,6 +140,8 @@ fun ParentShell(
                     children = children,
                     state = state,
                     now = moment,
+                    openId = openChildId,
+                    onOpenChild = { openChildId = it },
                     onAdd = onAdd,
                     onVerifyChild = onVerifyChild,
                     onConfirmJoin = onConfirmJoin,
@@ -152,7 +155,7 @@ fun ParentShell(
                 )
             }
         }
-        if (tab == HomeTab.Family) {
+        if (tab == HomeTab.Family && openChildId == null) {
             LimeButton(
                 label = stringResource(R.string.family_add_child),
                 onClick = onAdd,
@@ -436,6 +439,8 @@ private fun FamilyTabContent(
     children: List<Member>,
     state: FamilyUiState,
     now: Instant,
+    openId: String?,
+    onOpenChild: (String?) -> Unit,
     onAdd: () -> Unit,
     onVerifyChild: (String) -> Unit,
     onConfirmJoin: (String) -> Unit,
@@ -448,6 +453,40 @@ private fun FamilyTabContent(
     onSignOut: () -> Unit,
 ) {
     val palette = LocalFsPalette.current
+    val opened = children.firstOrNull { it.id == openId }
+    if (opened != null) {
+        Column(Modifier.fillMaxSize().background(palette.bg).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) {
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier.size(44.dp).clickable { onOpenChild(null) },
+                    contentAlignment = Alignment.Center,
+                ) { com.familyshield.app.ui.v3.BackIcon(palette.text) }
+                Text(
+                    opened.displayName.ifBlank { stringResource(R.string.cd_child) },
+                    modifier = Modifier.weight(1f),
+                    color = palette.text,
+                    fontFamily = Pretendard,
+                    fontWeight = FontWeight(650),
+                    fontSize = 17.sp,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                )
+                Spacer(Modifier.size(44.dp))
+            }
+            ChildCard(
+                member = opened,
+                now = now,
+                busy = state.busy,
+                onVerify = { onVerifyChild(opened.id) },
+                onConfirmJoin = { onConfirmJoin(opened.id) },
+                onRejectJoin = { onRejectJoin(opened.id) },
+                onConfirmPhone = { onConfirmPhone(opened.id) },
+                onRejectPhone = { onRejectPhone(opened.id) },
+                onReissue = { onReissue(opened.id) },
+                onCallOnly = { onCallOnly(opened.id) },
+            )
+        }
+        return
+    }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) {
         BrandRow(parentName, onRefresh, onSignOut)
         Text(
@@ -484,22 +523,38 @@ private fun FamilyTabContent(
             Column(Modifier.clip(RoundedCornerShape(24.dp)).background(palette.surface)) {
                 children.forEachIndexed { index, member ->
                     if (index > 0) Box(Modifier.padding(start = 76.dp).fillMaxWidth().height(0.5.dp).background(palette.line))
-                    ChildCard(
-                        member = member,
-                        now = now,
-                        busy = state.busy,
-                        onVerify = { onVerifyChild(member.id) },
-                        onConfirmJoin = { onConfirmJoin(member.id) },
-                        onRejectJoin = { onRejectJoin(member.id) },
-                        onConfirmPhone = { onConfirmPhone(member.id) },
-                        onRejectPhone = { onRejectPhone(member.id) },
-                        onReissue = { onReissue(member.id) },
-                        onCallOnly = { onCallOnly(member.id) },
-                    )
+                    FamilyMemberRow(member) { onOpenChild(member.id) }
                 }
             }
         }
         Spacer(Modifier.height(16.dp))
+    }
+}
+
+@Composable
+private fun FamilyMemberRow(member: Member, onOpen: () -> Unit) {
+    val palette = LocalFsPalette.current
+    val ready = MemberRules.canVerify(member)
+    val name = member.displayName.ifBlank { stringResource(R.string.cd_child) }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onOpen)
+            .testTag("child_${member.id}")
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        InitialAvatar(name, size = 48.dp)
+        Column(Modifier.padding(start = 12.dp).weight(1f)) {
+            Text(name, color = palette.text, fontFamily = Pretendard, fontWeight = FontWeight(650), fontSize = 17.sp)
+            if (ready) {
+                Text(stringResource(R.string.family_can_check), color = palette.muted, fontFamily = Pretendard, fontSize = 14.sp)
+            }
+            member.phoneLast4?.let {
+                Text(stringResource(R.string.family_number_ending, it), color = palette.muted, fontFamily = Pretendard, fontSize = 14.sp)
+            }
+        }
+        com.familyshield.app.ui.v3.ChevronIcon(palette.muted)
     }
 }
 

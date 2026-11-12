@@ -220,8 +220,7 @@ internal fun ChildCard(
     val expires = Times.shortDateTime(member.inviteExpiresAt, locale)
     val name = member.displayName.ifBlank { stringResource(R.string.cd_child) }
     val last4 = member.phoneLast4.orEmpty()
-    Card(modifier = Modifier.fillMaxWidth().testTag("child_${member.id}")) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(Modifier.fillMaxWidth().padding(top = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(name, style = MaterialTheme.typography.titleMedium)
             Text(statusLine(stage, name, last4, expires))
             if (member.awaitingConfirm) {
@@ -257,7 +256,6 @@ internal fun ChildCard(
                 modifier = Modifier.testTag("verify_${member.id}"),
             ) { Text(stringResource(R.string.action_verify)) }
         }
-    }
 }
 
 @Composable
@@ -453,10 +451,7 @@ fun NewCaseContent(
             }
             Text(stringResource(R.string.share_kicker), color = palette.muted, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, fontSize = 12.sp)
             Text(stringResource(R.string.share_who), color = palette.text, fontFamily = com.familyshield.app.ui.theme.Pretendard, fontWeight = androidx.compose.ui.text.font.FontWeight(700), fontSize = 32.sp, lineHeight = 40.sp)
-            Text(stringResource(R.string.new_case_explain), color = palette.muted, fontFamily = com.familyshield.app.ui.theme.Pretendard, fontSize = 14.sp)
-            Text(stringResource(R.string.new_case_not_sent_yet), color = palette.muted, modifier = Modifier.testTag("share_held"))
             state.draftAudio?.let { audio ->
-                val kilobytes = ((audio.file.length().coerceAtLeast(0L) + 1023L) / 1024L).toInt().coerceAtLeast(1)
                 Column(
                     Modifier.fillMaxWidth().clip(androidx.compose.foundation.shape.RoundedCornerShape(24.dp)).background(palette.hero).padding(16.dp).testTag("draft_audio").semantics {
                         contentDescription = audio.displayName
@@ -465,10 +460,12 @@ fun NewCaseContent(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         com.familyshield.app.ui.v3.PlayIcon(palette.lime)
                         Text(audio.displayName, color = palette.sheet, modifier = Modifier.padding(start = 8.dp).weight(1f), fontFamily = com.familyshield.app.ui.theme.Pretendard)
-                        Text(stringResource(R.string.new_case_audio_remove), color = palette.heroMuted, modifier = Modifier.testTag("remove_audio").clickable(enabled = !state.busy, onClick = onRemoveAudio))
+                        Box(
+                            Modifier.size(44.dp).testTag("remove_audio").clickable(enabled = !state.busy, onClick = onRemoveAudio),
+                            contentAlignment = Alignment.Center,
+                        ) { com.familyshield.app.ui.v3.CloseIcon(palette.heroMuted) }
                     }
                     com.familyshield.app.ui.v3.Waveform(palette.lime, Modifier.padding(top = 12.dp))
-                    Text(stringResource(R.string.new_case_audio_attached, audio.displayName, kilobytes), color = palette.heroMuted, fontSize = 12.sp)
                 }
             }
             if (members.isEmpty()) {
@@ -490,16 +487,24 @@ fun NewCaseContent(
                     }
                 }
             }
-            OutlinedTextField(
-                value = state.caseText,
-                onValueChange = onText,
-                label = { Text(stringResource(R.string.new_case_text_label)) },
-                supportingText = { Text(stringResource(R.string.new_case_text_hint)) },
-                modifier = Modifier.fillMaxWidth().testTag("case_text"),
-                minLines = 2,
-            )
-            Text(stringResource(R.string.new_case_counter, state.caseText.length, FamilyViewModel.TEXT_LIMIT), color = palette.muted)
+            if (state.draftAudio == null) {
+                OutlinedTextField(
+                    value = state.caseText,
+                    onValueChange = onText,
+                    label = { Text(stringResource(R.string.new_case_text_label)) },
+                    modifier = Modifier.fillMaxWidth().testTag("case_text"),
+                    minLines = 2,
+                )
+            }
             state.error?.let { ErrorText(it) }
+            Text(
+                stringResource(R.string.new_case_not_sent_yet),
+                color = palette.muted,
+                fontFamily = com.familyshield.app.ui.theme.Pretendard,
+                fontSize = 14.sp,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp).testTag("share_held"),
+            )
             val label = selected?.let { stringResource(R.string.share_ask, it.displayName) } ?: stringResource(R.string.new_case_submit)
             com.familyshield.app.ui.v3.LimeButton(
                 label = label,

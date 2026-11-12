@@ -17,7 +17,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -206,13 +211,8 @@ fun ResultScreen(case: ParentCase, color: CaseColor, onBack: () -> Unit) {
     } else {
         stringResource(R.string.family_alert_message_with_story, name, story)
     }
-    Column(
-        Modifier
-            .fillMaxSize()
-            .background(ResultInk)
-            .verticalScroll(rememberScrollState())
-            .testTag("case_screen"),
-    ) {
+    var detailsOpen by remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxSize().background(ResultInk).testTag("case_screen")) {
         Row(Modifier.fillMaxWidth().padding(top = 8.dp, start = 8.dp, end = 20.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(
                 Modifier.size(44.dp).testTag("back").clickable(onClick = onBack),
@@ -229,7 +229,12 @@ fun ResultScreen(case: ParentCase, color: CaseColor, onBack: () -> Unit) {
             )
             Spacer(Modifier.width(44.dp))
         }
-        Column(Modifier.padding(horizontal = 20.dp)) {
+        Column(
+            Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp),
+        ) {
             Text(stringResource(R.string.v3_direct), color = palette.heroMuted, fontFamily = FontFamily.Monospace, fontSize = 12.sp, letterSpacing = 0.6.sp, modifier = Modifier.padding(top = 12.dp))
             Row(Modifier.padding(top = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -249,38 +254,67 @@ fun ResultScreen(case: ParentCase, color: CaseColor, onBack: () -> Unit) {
                 amount?.let { Text(stringResource(R.string.home_amount_line, it), color = palette.heroMuted, fontFamily = Pretendard, fontSize = 14.sp, modifier = Modifier.weight(1f)) }
                 if (whenLabel.isNotBlank()) Text(whenLabel, color = palette.heroMuted, fontFamily = Pretendard, fontSize = 14.sp)
             }
-            if (copy != null) {
-                Text(stringResource(copy.body, name, whenLabel), color = ResultCream, fontFamily = Pretendard, fontSize = 15.sp, modifier = Modifier.padding(top = 12.dp).testTag("result_body"))
-            }
         }
         Column(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)).background(palette.sheet).padding(20.dp).testTag("result_card"),
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)).background(palette.sheet).padding(horizontal = 20.dp, vertical = 20.dp).testTag("result_card"),
         ) {
             val sheetTitle = if (confirmed) stringResource(R.string.v3_sheet_yes) else stringResource(R.string.v3_sheet_scam)
-            Text(sheetTitle, color = palette.sheetText, fontFamily = Pretendard, fontWeight = FontWeight(700), fontSize = 20.sp, modifier = Modifier.testTag("result_title"))
-            if (confirmed) {
-                Text(stringResource(R.string.v3_sheet_yes_body, name), color = palette.sheetMuted, fontFamily = Pretendard, fontSize = 15.sp, modifier = Modifier.padding(top = 8.dp, bottom = 16.dp))
-                LimeButton(stringResource(R.string.v3_done), onClick = onBack)
+            val shortLine = if (confirmed) {
+                stringResource(R.string.v3_sheet_yes_body, name)
             } else {
-                Text(stringResource(R.string.family_alert_heading), color = palette.sheetText, fontFamily = Pretendard, fontWeight = FontWeight(650), fontSize = 16.sp, modifier = Modifier.padding(top = 8.dp))
-                Text(message, color = palette.sheetMuted, fontFamily = Pretendard, fontSize = 15.sp, modifier = Modifier.padding(top = 6.dp, bottom = 16.dp).testTag("family_alert"))
+                stringResource(R.string.v3_sheet_scam_line)
+            }
+            Text(sheetTitle, color = palette.sheetText, fontFamily = Pretendard, fontWeight = FontWeight(700), fontSize = 20.sp, lineHeight = 28.sp, modifier = Modifier.testTag("result_title"))
+            Text(shortLine, color = palette.sheetMuted, fontFamily = Pretendard, fontSize = 15.sp, lineHeight = 22.sp, modifier = Modifier.padding(top = 8.dp))
+            Text(
+                stringResource(if (detailsOpen) R.string.v3_details_hide else R.string.v3_details),
+                color = palette.sheetText,
+                fontFamily = Pretendard,
+                fontWeight = FontWeight(500),
+                fontSize = 15.sp,
+                modifier = Modifier
+                    .padding(top = 4.dp)
+                    .heightIn(min = 44.dp)
+                    .clickable { detailsOpen = !detailsOpen }
+                    .testTag("result_details"),
+            )
+            if (detailsOpen) {
+                if (copy != null) {
+                    Text(
+                        stringResource(copy.body, name, whenLabel),
+                        color = palette.sheetMuted,
+                        fontFamily = Pretendard,
+                        fontSize = 15.sp,
+                        lineHeight = 22.sp,
+                        modifier = Modifier.padding(bottom = 8.dp).testTag("result_body"),
+                    )
+                }
+                if (!confirmed) {
+                    Text(stringResource(R.string.family_alert_heading), color = palette.sheetText, fontFamily = Pretendard, fontWeight = FontWeight(650), fontSize = 16.sp)
+                    Text(message, color = palette.sheetMuted, fontFamily = Pretendard, fontSize = 15.sp, lineHeight = 22.sp, modifier = Modifier.padding(top = 6.dp).testTag("family_alert"))
+                    Text(
+                        stringResource(R.string.action_copy),
+                        color = palette.sheetMuted,
+                        fontFamily = Pretendard,
+                        modifier = Modifier
+                            .padding(top = 8.dp, bottom = 8.dp)
+                            .heightIn(min = 44.dp)
+                            .testTag("alert_copy")
+                            .clickable {
+                                copyText(context, context.getString(R.string.family_alert_clip_label), message)
+                            },
+                    )
+                }
+            }
+            if (confirmed) {
+                LimeButton(stringResource(R.string.v3_done), onClick = onBack, modifier = Modifier.padding(top = 8.dp))
+            } else {
                 InkButton(
                     label = stringResource(R.string.v3_share),
                     onClick = { shareText(context, context.getString(R.string.family_alert_share_title), message) },
                     background = palette.sheetText,
                     foreground = palette.sheet,
-                )
-                Text(
-                    stringResource(R.string.action_copy),
-                    color = palette.sheetMuted,
-                    fontFamily = Pretendard,
-                    modifier = Modifier
-                        .padding(top = 8.dp)
-                        .testTag("alert_copy")
-                        .align(Alignment.CenterHorizontally)
-                        .clickable(onClick = {
-                            copyText(context, context.getString(R.string.family_alert_clip_label), message)
-                        }),
+                    modifier = Modifier.padding(top = 8.dp),
                 )
             }
         }
