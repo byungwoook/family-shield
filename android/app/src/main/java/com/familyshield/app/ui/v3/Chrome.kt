@@ -369,6 +369,37 @@ fun BackIcon(color: Color, modifier: Modifier = Modifier) {
 }
 
 @Composable
+fun ScanFaceIcon(color: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier.size(16.dp)) {
+        val stroke = 1.5.dp.toPx()
+        val cap = StrokeCap.Round
+        val a = size.width * 0.16f
+        val b = size.width * 0.42f
+        val c = size.width - a
+        val d = size.width - b
+        drawLine(color, Offset(a, b), Offset(a, a), stroke, cap)
+        drawLine(color, Offset(a, a), Offset(b, a), stroke, cap)
+        drawLine(color, Offset(c, b), Offset(c, a), stroke, cap)
+        drawLine(color, Offset(c, a), Offset(d, a), stroke, cap)
+        drawLine(color, Offset(a, d), Offset(a, c), stroke, cap)
+        drawLine(color, Offset(a, c), Offset(b, c), stroke, cap)
+        drawLine(color, Offset(c, d), Offset(c, c), stroke, cap)
+        drawLine(color, Offset(c, c), Offset(d, c), stroke, cap)
+        drawCircle(color, radius = size.width * 0.045f, center = Offset(size.width * 0.38f, size.height * 0.44f))
+        drawCircle(color, radius = size.width * 0.045f, center = Offset(size.width * 0.62f, size.height * 0.44f))
+        drawArc(
+            color,
+            startAngle = 20f,
+            sweepAngle = 140f,
+            useCenter = false,
+            topLeft = Offset(size.width * 0.34f, size.height * 0.42f),
+            size = androidx.compose.ui.geometry.Size(size.width * 0.32f, size.height * 0.32f),
+            style = Stroke(stroke, cap = cap),
+        )
+    }
+}
+
+@Composable
 fun CheckIcon(color: Color, modifier: Modifier = Modifier) {
     Canvas(modifier.size(16.dp)) {
         val stroke = 1.7.dp.toPx()

@@ -68,7 +68,9 @@ import com.familyshield.app.ui.v3.InkButton
 import com.familyshield.app.ui.v3.InitialAvatar
 import com.familyshield.app.ui.v3.LimeButton
 import com.familyshield.app.ui.v3.PhoneIcon
+import com.familyshield.app.ui.v3.ScanFaceIcon
 import java.time.Instant
+import java.time.ZoneId
 
 private val ResultInk = Color(0xFF0D1015)
 private val ResultCream = Color(0xFFF3F0E9)
@@ -200,7 +202,7 @@ private fun StepLine(index: Int, state: String, title: String, body: String) {
 }
 
 @Composable
-fun ResultScreen(case: ParentCase, color: CaseColor, onBack: () -> Unit) {
+fun ResultScreen(case: ParentCase, color: CaseColor, onBack: () -> Unit, now: Instant = Instant.now()) {
     val palette = LocalFsPalette.current
     val locale = LocalConfiguration.current.locales[0]
     val context = LocalContext.current
@@ -212,7 +214,7 @@ fun ResultScreen(case: ParentCase, color: CaseColor, onBack: () -> Unit) {
     val headline = if (confirmed) stringResource(R.string.v3_headline_yes, subject) else stringResource(R.string.v3_headline_no, subject)
     val word = if (confirmed) stringResource(R.string.child_yes) else stringResource(R.string.child_no)
     val detail = if (confirmed) stringResource(R.string.v3_yes_detail) else stringResource(R.string.v3_no_detail)
-    val whenLabel = Times.shortTime(case.decidedAt, locale)
+    val whenLabel = resultWhen(case.decidedAt, locale, now)
     val amount = case.claims?.amount.known()
     val copy = CaseCopy.result(color, case.result)
     val story = case.claims?.story.known()
@@ -263,12 +265,32 @@ fun ResultScreen(case: ParentCase, color: CaseColor, onBack: () -> Unit) {
                         .padding(start = 30.dp, end = 20.dp, top = 16.dp, bottom = 16.dp),
                     horizontalAlignment = Alignment.Start,
                 ) {
-                    Text(stringResource(R.string.v3_answer_caption), color = ResultInk, fontFamily = Pretendard, fontWeight = FontWeight(500), fontSize = 12.sp, lineHeight = 18.sp)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        ScanFaceIcon(ResultInk)
+                        Text(
+                            stringResource(R.string.v3_answer_caption),
+                            color = ResultInk,
+                            fontFamily = Pretendard,
+                            fontWeight = FontWeight(500),
+                            fontSize = 12.sp,
+                            lineHeight = 18.sp,
+                            modifier = Modifier.padding(start = 6.dp),
+                        )
+                    }
                     Text(word, color = ResultInk, fontFamily = Pretendard, fontWeight = FontWeight(700), fontSize = 38.sp, lineHeight = 46.sp)
                     Text(detail, color = ResultInk, fontFamily = Pretendard, fontSize = 14.sp, lineHeight = 21.sp)
                 }
             }
-            Text(headline, color = ResultCream, fontFamily = Pretendard, fontWeight = FontWeight(700), fontSize = 38.sp, lineHeight = 46.sp, modifier = Modifier.padding(top = 28.dp))
+            Text(
+                headline,
+                color = ResultCream,
+                fontFamily = Pretendard,
+                fontWeight = FontWeight(700),
+                fontSize = 38.sp,
+                lineHeight = 46.sp,
+                letterSpacing = (-1).sp,
+                modifier = Modifier.padding(top = 28.dp),
+            )
             Row(Modifier.fillMaxWidth().padding(top = 12.dp)) {
                 amount?.let { Text(stringResource(R.string.home_amount_line, it), color = palette.heroMuted, fontFamily = Pretendard, fontSize = 14.sp, modifier = Modifier.weight(1f)) }
                 if (whenLabel.isNotBlank()) Text(whenLabel, color = palette.heroMuted, fontFamily = Pretendard, fontSize = 14.sp)
@@ -292,7 +314,7 @@ fun ResultScreen(case: ParentCase, color: CaseColor, onBack: () -> Unit) {
             } else {
                 stringResource(R.string.v3_sheet_scam_line)
             }
-            Text(sheetTitle, color = palette.sheetText, fontFamily = Pretendard, fontWeight = FontWeight(700), fontSize = 20.sp, lineHeight = 28.sp, modifier = Modifier.testTag("result_title"))
+            Text(sheetTitle, color = palette.sheetText, fontFamily = Pretendard, fontWeight = FontWeight(650), fontSize = 20.sp, lineHeight = 28.sp, modifier = Modifier.testTag("result_title"))
             Text(shortLine, color = palette.sheetMuted, fontFamily = Pretendard, fontSize = 15.sp, lineHeight = 22.sp, modifier = Modifier.padding(top = 8.dp))
             Text(
                 stringResource(if (detailsOpen) R.string.v3_details_hide else R.string.v3_details),
@@ -365,6 +387,20 @@ fun YellowScreen(case: ParentCase, onBack: () -> Unit) {
         if (copy != null) {
             Text(stringResource(copy.body, name, whenLabel), color = palette.text, fontFamily = Pretendard, fontSize = 17.sp, modifier = Modifier.padding(top = 12.dp).testTag("result_body"))
         }
+    }
+}
+
+@Composable
+private fun resultWhen(iso: String?, locale: java.util.Locale, now: Instant): String {
+    val zone = ZoneId.systemDefault()
+    val instant = Times.parse(iso) ?: return ""
+    val time = Times.shortTime(iso, locale, zone)
+    val day = instant.atZone(zone).toLocalDate()
+    val today = now.atZone(zone).toLocalDate()
+    return when (day) {
+        today -> stringResource(R.string.v3_today) + " " + time
+        today.minusDays(1) -> stringResource(R.string.v3_yesterday) + " " + time
+        else -> time
     }
 }
 

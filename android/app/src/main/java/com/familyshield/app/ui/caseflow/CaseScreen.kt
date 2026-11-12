@@ -79,7 +79,7 @@ fun CaseRoute(viewModel: CaseViewModel, onBack: () -> Unit) {
 fun CaseContent(case: ParentCase, pollError: Boolean, onBack: () -> Unit, now: java.time.Instant = java.time.Instant.now()) {
     val color = CaseColor.of(case.color, case.decidedAt)
     if (color == CaseColor.GREEN || color == CaseColor.RED) {
-        ResultScreen(case, color, onBack)
+        ResultScreen(case, color, onBack, now)
     } else if (color == CaseColor.OPEN) {
         ProgressScreen(case, pollError, onBack, now)
     } else {
