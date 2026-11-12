@@ -27,6 +27,7 @@ final class AppModel {
 
     private(set) var phase: Phase = .loading
     var openCase: ParentCase?
+    var parentDisplayName = ""
     let session: KeychainTokenStore
     let api: APIClient
     private var pushToken: String?
@@ -162,6 +163,11 @@ final class AppModel {
     }
 
     private func apply(_ me: Me) {
+        if let parent = me.memberships.first(where: { $0.role == "parent" && $0.status == "active" }) {
+            parentDisplayName = parent.displayName.isEmpty ? me.displayName : parent.displayName
+        } else {
+            parentDisplayName = me.displayName
+        }
         switch SessionRoute.destination(for: me) {
         case .needsFamily:
             phase = .needsFamily

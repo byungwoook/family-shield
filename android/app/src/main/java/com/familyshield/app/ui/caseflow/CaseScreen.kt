@@ -75,103 +75,15 @@ fun CaseRoute(viewModel: CaseViewModel, onBack: () -> Unit) {
     CaseContent(case = current, pollError = state.error != null, onBack = onBack)
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CaseContent(case: ParentCase, pollError: Boolean, onBack: () -> Unit) {
+fun CaseContent(case: ParentCase, pollError: Boolean, onBack: () -> Unit, now: java.time.Instant = java.time.Instant.now()) {
     val color = CaseColor.of(case.color, case.decidedAt)
-    val tone = LocalResultTones.current.of(color)
-    val locale = LocalConfiguration.current.locales[0]
-    val context = LocalContext.current
-    val name = case.childDisplayName.ifBlank { stringResource(R.string.cd_child) }
-    val whenLabel = Times.shortTime(case.decidedAt, locale)
-    val statusCd = when (color) {
-        CaseColor.OPEN -> stringResource(R.string.cd_status_open)
-        CaseColor.GREEN -> stringResource(R.string.cd_status_green)
-        CaseColor.RED -> stringResource(R.string.cd_status_red)
-        CaseColor.YELLOW -> stringResource(R.string.cd_status_yellow)
-    }
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.case_title, name)) },
-                navigationIcon = { TextButton(onClick = onBack) { Text(stringResource(R.string.cd_back)) } },
-            )
-        },
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp)
-                .testTag("case_screen"),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            if (color == CaseColor.OPEN) {
-                Text(
-                    stringResource(R.string.case_dont_send),
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.testTag("dont_send"),
-                )
-                Text(stringResource(CaseCopy.openLine(case.state), name))
-            }
-            val copy = CaseCopy.result(color, case.result)
-            if (copy != null) {
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = tone.container, contentColor = tone.content),
-                    modifier = Modifier.fillMaxWidth().semantics { contentDescription = statusCd }.testTag("result_card"),
-                ) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(stringResource(copy.title), style = MaterialTheme.typography.titleLarge, modifier = Modifier.testTag("result_title"))
-                        Text(stringResource(copy.body, name, whenLabel), modifier = Modifier.testTag("result_body"))
-                        if (whenLabel.isNotBlank()) Text(stringResource(R.string.case_checked_at, whenLabel))
-                    }
-                }
-            }
-            val pattern = CaseCopy.patternLabel(case.patternId)
-            if (pattern != null) {
-                Text(stringResource(CaseCopy.patternLine(color), stringResource(pattern), name))
-            }
-            if (CaseCopy.offersFamilyAlert(color)) {
-                val story = case.claims?.story?.takeUnless { it.isBlank() || it.equals("unknown", ignoreCase = true) }
-                val message = if (story == null) {
-                    stringResource(R.string.family_alert_message, name)
-                } else {
-                    stringResource(R.string.family_alert_message_with_story, name, story)
-                }
-                Text(stringResource(R.string.family_alert_heading), style = MaterialTheme.typography.titleMedium)
-                Text(stringResource(R.string.family_alert_lead))
-                Text(message, modifier = Modifier.testTag("family_alert"))
-                RowButtons(
-                    onCopy = { copyText(context, context.getString(R.string.family_alert_clip_label), message) },
-                    onShare = { shareText(context, context.getString(R.string.family_alert_share_title), message) },
-                )
-            }
-            case.claims?.let { claims ->
-                if (claims.hasAnything()) {
-                    Text(stringResource(R.string.claims_heading), style = MaterialTheme.typography.titleMedium)
-                    claims.claimedIdentity.known()?.let { Text(stringResource(R.string.claims_identity, it)) }
-                    claims.amount.known()?.let { Text(stringResource(R.string.claims_amount, it)) }
-                    claims.story.known()?.let { Text(stringResource(R.string.claims_story, it)) }
-                    if (claims.redFlags.any { it.known() != null }) {
-                        val flags = claims.redFlags.mapNotNull { it.known() }.joinToString(stringResource(R.string.list_separator))
-                        Text(stringResource(R.string.claims_red_flags, flags))
-                    }
-                }
-            }
-            if (case.parentText.isNotBlank()) {
-                Text(stringResource(R.string.case_your_text_heading), style = MaterialTheme.typography.titleMedium)
-                Text(case.parentText)
-            }
-            if (case.timeline.isNotEmpty()) {
-                Text(stringResource(R.string.case_timeline_heading), style = MaterialTheme.typography.titleMedium)
-                case.timeline.forEach { step -> Text("• " + stringResource(CaseCopy.timelineStep(step))) }
-            }
-            if (pollError && color == CaseColor.OPEN) {
-                ErrorText(com.familyshield.app.ui.common.UiText(R.string.case_update_failed))
-            }
-        }
+    if (color == CaseColor.GREEN || color == CaseColor.RED) {
+        ResultScreen(case, color, onBack, now)
+    } else if (color == CaseColor.OPEN) {
+        ProgressScreen(case, pollError, onBack, now)
+    } else {
+        YellowScreen(case, onBack)
     }
 }
 

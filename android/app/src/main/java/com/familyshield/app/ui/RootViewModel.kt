@@ -24,7 +24,7 @@ sealed interface RootState {
     data object Loading : RootState
     data object SignedOut : RootState
     data object NeedsFamily : RootState
-    data class Parent(val familyId: String, val familyName: String) : RootState
+    data class Parent(val familyId: String, val familyName: String, val displayName: String = "") : RootState
     data class Child(
         val memberId: String,
         val familyId: String,
@@ -50,6 +50,7 @@ class RootViewModel(
 
     private val _state = MutableStateFlow<RootState>(RootState.Loading)
     val state: StateFlow<RootState> = _state.asStateFlow()
+    private var selfName: String = ""
 
     init {
         viewModelScope.launch {
@@ -68,7 +69,9 @@ class RootViewModel(
     private suspend fun resolve() {
         _state.value = RootState.Loading
         try {
-            _state.value = route(auth.me())
+            val me = auth.me()
+            selfName = me.displayName
+            _state.value = route(me)
         } catch (e: ApiException) {
             // A 401 already signed the session out; the token collector shows sign-in.
             if (e is ApiException.Http && e.status == 401) return
@@ -82,7 +85,8 @@ class RootViewModel(
     }
 
     fun familyCreated(family: FamilyCreated) {
-        _state.value = RootState.Parent(family.id, family.name)
+        val name = (_state.value as? RootState.Parent)?.displayName ?: selfName
+        _state.value = RootState.Parent(family.id, family.name, name)
     }
 
     fun signOut() = auth.signOut()
@@ -92,7 +96,13 @@ class RootViewModel(
         fun route(me: Me): RootState {
             if (me.memberships.isEmpty()) return RootState.NeedsFamily
             me.memberships.firstOrNull { it.role == "parent" && it.status == "active" }
-                ?.let { return RootState.Parent(it.familyId, it.familyName) }
+                ?.let {
+                    return RootState.Parent(
+                        it.familyId,
+                        it.familyName,
+                        it.displayName.ifBlank { me.displayName },
+                    )
+                }
             me.memberships.firstOrNull { it.role == "child" }
                 ?.let {
                     return RootState.Child(

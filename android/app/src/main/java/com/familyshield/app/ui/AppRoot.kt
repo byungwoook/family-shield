@@ -134,6 +134,7 @@ fun AppRoot(container: AppContainer) {
             FamilyRoute(
                 viewModel = family,
                 familyName = current.familyName,
+                parentName = current.displayName,
                 onOpenCase = { opened: ParentCase -> openCaseId = opened.id },
                 onOpenRecent = { openCaseId = it },
                 onSignOut = {

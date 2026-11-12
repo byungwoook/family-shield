@@ -42,6 +42,7 @@ class ChildScreenTest {
             }
         }
         compose.onNodeWithText("Did you send your family a message asking for money?").assertIsDisplayed()
+        compose.onNodeWithTag("answer_no").performClick()
         compose.onNodeWithTag("not_now").performClick()
         assertEquals(listOf("not_now"), calls)
         assertFalse(calls.contains("yes"))

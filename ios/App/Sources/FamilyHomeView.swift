@@ -46,71 +46,27 @@ struct FamilyHomeView: View {
     private var locale: AppLocale { AppLocale.resolve() }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack {
-                    Text(model.home.familyName).font(.title2)
-                    Spacer()
-                    Button(CopyCatalog.text(.cdRefresh, locale)) { Task { await model.refresh() } }
-                        .accessibilityIdentifier("refresh")
-                    Button(CopyCatalog.text(.actionSignOut, locale), action: onSignOut)
-                }
-                if model.loading && model.home.children.isEmpty && model.error == nil {
-                    ProgressView(CopyCatalog.text(.loading, locale))
-                } else if let error = model.error, model.home.children.isEmpty {
+        Group {
+            if model.loading && model.home.children.isEmpty && model.error == nil {
+                ProgressView(CopyCatalog.text(.loading, locale))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .accessibilityIdentifier("family_home")
+            } else if let error = model.error, model.home.children.isEmpty {
+                VStack(alignment: .leading, spacing: 16) {
                     Banner(text: error)
                     Button(CopyCatalog.text(.actionRetry, locale)) { Task { await model.refresh() } }
-                } else {
-                    if let notice = model.notice { Banner(text: notice, tone: Theme.accent) }
-                    if let error = model.error { Banner(text: error) }
-                    Text(CopyCatalog.text(.familyChildrenHeading, locale)).font(.headline)
-                    if model.home.isEmpty {
-                        Text(CopyCatalog.text(.familyEmptyTitle, locale))
-                            .font(.title3)
-                            .accessibilityIdentifier("family_empty")
-                        Text(CopyCatalog.text(.familyEmptyBody, locale))
-                    } else {
-                        ForEach(model.home.children) { child in
-                            ChildCard(child: child, busy: model.busy) { action in
-                                Task { await handle(action, child: child) }
-                            }
-                        }
-                    }
-                    PrimaryButton(title: CopyCatalog.text(.familyAddChild, locale), identifier: "add_child") {
-                        model.addName = ""
-                        model.addPhone = ""
-                        model.addByPhone = false
-                        model.showAdd = true
-                    }
-                    PrimaryButton(title: CopyCatalog.text(.familyVerifyMessage, locale), identifier: "verify_message") {
-                        model.openNewCase()
-                    }
-                    Divider()
-                    Text(CopyCatalog.text(.familyRecentHeading, locale)).font(.headline)
-                    if model.home.recent.isEmpty {
-                        Text(CopyCatalog.text(.familyRecentEmpty, locale))
-                    } else {
-                        ForEach(model.home.recent) { row in
-                            Button {
-                                Task {
-                                    if let item = await model.loadCase(row.id) { onOpened(item) }
-                                }
-                            } label: {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(row.title)
-                                    Text(row.subtitle).font(.subheadline).foregroundStyle(.secondary)
-                                }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.vertical, 8)
-                            }
-                            .accessibilityIdentifier("recent_\(row.id)")
-                        }
-                    }
+                }
+                .padding(24)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .accessibilityIdentifier("family_home")
+            } else {
+                V3ParentHome(model: model, onOpen: { id in
+                    Task { if let item = await model.loadCase(id) { onOpened(item) } }
+                }, onSignOut: onSignOut) { action, child in
+                    Task { await handle(action, child: child) }
                 }
             }
-            .padding(16)
         }
-        .accessibilityIdentifier("family_home")
     }
 
     private func handle(_ action: ChildAction, child: ChildCardState) async {
@@ -190,65 +146,92 @@ struct NewCaseView: View {
     private var locale: AppLocale { AppLocale.resolve() }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack {
-                    Button(CopyCatalog.text(.cdBack, locale), action: onBack)
-                        .accessibilityIdentifier("back")
-                    Text(CopyCatalog.text(.newCaseTitle, locale)).font(.title2)
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Button(action: onBack) {
+                    Image(systemName: "xmark").frame(width: 44, height: 44)
                 }
-                Text(CopyCatalog.text(.newCaseNotSentYet, locale))
-                    .font(.footnote)
-                    .accessibilityIdentifier("not_sent_yet")
-                Text(CopyCatalog.text(.newCaseChildHeading, locale)).font(.headline)
-                if model.readyChildren.isEmpty {
-                    Text(CopyCatalog.text(.newCaseNoChildren, locale))
-                } else {
-                    ForEach(model.readyChildren) { child in
-                        Button {
-                            model.caseChildId = child.id
-                        } label: {
+                .accessibilityIdentifier("back")
+                Text(CopyCatalog.text(.newCaseTitle, locale))
+                    .font(Theme.font(17, weight: .semibold))
+                    .frame(maxWidth: .infinity)
+                Color.clear.frame(width: 44, height: 44)
+            }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text(CopyCatalog.text(.shareKicker, locale))
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                    Text(CopyCatalog.text(.shareWho, locale))
+                        .font(Theme.font(32, weight: .bold))
+                    if let audio = model.draft {
+                        VStack(alignment: .leading, spacing: 12) {
                             HStack {
-                                Image(systemName: model.caseChildId == child.id ? "largecircle.fill.circle" : "circle")
-                                Text(child.name)
+                                Image(systemName: "play.fill")
+                                Text(audio.displayName)
                                 Spacer()
+                                Button(action: { model.removeDraft() }) {
+                                    Image(systemName: "xmark").frame(width: 44, height: 44)
+                                }
+                                .accessibilityIdentifier("remove_audio")
                             }
                         }
-                        .accessibilityIdentifier("pick_\(child.id)")
-                    }
-                }
-                Text(CopyCatalog.text(.newCaseTextLabel, locale)).font(.headline)
-                TextField(CopyCatalog.text(.newCaseTextHint, locale), text: $model.caseText, axis: .vertical)
-                    .lineLimit(4...10)
-                    .textFieldStyle(.roundedBorder)
-                    .onChange(of: model.caseText) { _, value in
-                        if value.count > Limits.text { model.caseText = String(value.prefix(Limits.text)) }
-                    }
-                    .accessibilityIdentifier("case_text")
-                Text(CopyCatalog.text(.newCaseCounter, locale, model.caseText.count, Limits.text))
-                    .font(.footnote).foregroundStyle(.secondary)
-                if let audio = model.draft {
-                    let kilobytes = max(1, Int((audio.sizeBytes + 1023) / 1024))
-                    Text(CopyCatalog.text(.newCaseAudioAttached, locale, audio.displayName, kilobytes))
+                        .padding(16)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.black, in: RoundedRectangle(cornerRadius: 24))
+                        .foregroundStyle(.white)
                         .accessibilityIdentifier("draft_audio")
-                    Button(CopyCatalog.text(.newCaseAudioRemove, locale)) { model.removeDraft() }
-                        .disabled(model.busy)
-                        .accessibilityIdentifier("remove_audio")
-                }
-                Text(CopyCatalog.text(.newCaseExplain, locale))
-                if let error = model.error { Banner(text: error) }
-                PrimaryButton(
-                    title: CopyCatalog.text(.newCaseSubmit, locale),
-                    identifier: "verify_submit",
-                    enabled: !model.busy && model.caseChildId != nil
-                ) {
-                    Task {
-                        if let opened = await model.verify() { onOpened(opened) }
+                        .accessibilityLabel(CopyCatalog.text(.newCaseAudioAttached, locale, audio.displayName, max(1, Int((audio.sizeBytes + 1023) / 1024))))
                     }
+                    if model.readyChildren.isEmpty {
+                        Text(CopyCatalog.text(.newCaseNoChildren, locale))
+                    } else {
+                        VStack(spacing: 0) {
+                            ForEach(model.readyChildren) { child in
+                                Button {
+                                    model.caseChildId = child.id
+                                } label: {
+                                    HStack {
+                                        Text(child.name)
+                                        Spacer()
+                                        Image(systemName: model.caseChildId == child.id ? "largecircle.fill.circle" : "circle")
+                                    }
+                                    .padding(14)
+                                }
+                                .accessibilityIdentifier("pick_\(child.id)")
+                            }
+                        }
+                        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 24))
+                    }
+                    if model.draft == nil {
+                        TextField(CopyCatalog.text(.newCaseTextLabel, locale), text: $model.caseText, axis: .vertical)
+                            .lineLimit(3...8)
+                            .textFieldStyle(.roundedBorder)
+                            .onChange(of: model.caseText) { _, value in
+                                if value.count > Limits.text { model.caseText = String(value.prefix(Limits.text)) }
+                            }
+                            .accessibilityIdentifier("case_text")
+                    }
+                    if let error = model.error { Banner(text: error) }
+                    Text(CopyCatalog.text(.newCaseNotSentYet, locale))
+                        .font(Theme.font(14))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+                        .multilineTextAlignment(.center)
+                        .accessibilityIdentifier("not_sent_yet")
                 }
             }
-            .padding(16)
+            PrimaryButton(
+                title: model.readyChildren.first { $0.id == model.caseChildId }.map { CopyCatalog.text(.shareAsk, locale, $0.name) } ?? CopyCatalog.text(.newCaseSubmit, locale),
+                identifier: "verify_submit",
+                enabled: !model.busy && model.caseChildId != nil
+            ) {
+                Task {
+                    if let opened = await model.verify() { onOpened(opened) }
+                }
+            }
         }
+        .padding(20)
     }
 }
 

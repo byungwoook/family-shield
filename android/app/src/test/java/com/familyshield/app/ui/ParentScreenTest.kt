@@ -4,6 +4,8 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -53,7 +55,7 @@ class ParentScreenTest {
                 )
             }
         }
-        compose.onNodeWithText("No children yet").assertIsDisplayed()
+        compose.onNodeWithText("No children yet").performScrollTo().assertIsDisplayed()
     }
 
     @Test
@@ -86,6 +88,8 @@ class ParentScreenTest {
                 )
             }
         }
+        compose.onNodeWithTag("tab_family").performClick()
+        compose.onNodeWithTag("child_child-1").performClick()
         compose.onNodeWithText("Can't verify yet: confirm Mina first.").assertIsDisplayed()
         compose.onNodeWithTag("verify_child-1").assertIsNotEnabled()
     }
@@ -127,9 +131,12 @@ class ParentScreenTest {
                 )
             }
         }
-        compose.onNodeWithText("Scam").assertIsDisplayed()
+        compose.onNodeWithText("This may be a scam").assertIsDisplayed()
         compose.onNodeWithText("Do not send money", substring = true).assertIsDisplayed()
+        assertEquals(0, compose.onAllNodesWithTag("family_alert").fetchSemanticsNodes().size)
+        compose.onNodeWithTag("result_details").performClick()
         compose.onNodeWithText("Warn your family").assertIsDisplayed()
+        compose.onNodeWithTag("family_alert").assertIsDisplayed()
     }
 
     @Test
@@ -189,6 +196,9 @@ class KoreanResultTest {
                 )
             }
         }
+        compose.onNodeWithText("자세히 보기").assertIsDisplayed()
+        assertEquals(0, compose.onAllNodesWithText("돈을 보내지 마세요", substring = true).fetchSemanticsNodes().size)
+        compose.onNodeWithTag("result_details").performClick()
         compose.onNodeWithText("돈을 보내지 마세요", substring = true).assertIsDisplayed()
         compose.onNodeWithText("가족에게 알리세요").assertIsDisplayed()
     }

@@ -6,7 +6,6 @@ struct CaseScreen: View {
     var onBack: () -> Void
     @State private var current: ParentCase
     @State private var updateFailed = false
-    @Environment(\.colorScheme) private var scheme
     @State private var copied = false
 
     init(item: ParentCase, api: APIClient, onBack: @escaping () -> Void) {
@@ -21,64 +20,16 @@ struct CaseScreen: View {
     }
 
     var body: some View {
-        let view = presentation
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack {
-                    Button(CopyCatalog.text(.cdBack, locale), action: onBack)
-                        .accessibilityIdentifier("back")
-                    Text(CopyCatalog.text(.caseTitle, locale, view.name)).font(.title2)
-                }
-                if let dont = view.dontSend {
-                    Text(dont).font(.title3).bold()
-                        .accessibilityIdentifier("dont_send")
-                }
-                if let line = view.openLine { Text(line) }
-                if !view.title.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(view.title).font(.title2).accessibilityIdentifier("result_title")
-                        Text(view.body).accessibilityIdentifier("result_body")
-                        if let checked = view.checkedAt { Text(checked).font(.footnote) }
-                    }
-                    .padding(16)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Theme.background(view.color, scheme: scheme))
-                    .foregroundStyle(Theme.foreground(view.color, scheme: scheme))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .accessibilityElement(children: .contain)
-                    .accessibilityIdentifier("result_card")
-                }
-                if let pattern = view.patternLine { Text(pattern) }
-                if let alert = view.familyAlert {
-                    Text(CopyCatalog.text(.familyAlertHeading, locale)).font(.headline)
-                    Text(CopyCatalog.text(.familyAlertLead, locale))
-                    Text(alert).accessibilityIdentifier("family_alert")
-                    Button(copied ? CopyCatalog.text(.copied, locale) : CopyCatalog.text(.actionCopy, locale)) {
-                        Pasteboard.copy(alert, expiresAfter: 600)
-                        copied = true
-                    }
-                    .accessibilityIdentifier("alert_copy")
-                    Button(CopyCatalog.text(.actionShare, locale)) { ShareSheet.present(alert) }
-                }
-                if let heading = view.claimsHeading {
-                    Text(heading).font(.headline)
-                    ForEach(Array(view.claimLines.enumerated()), id: \.offset) { _, line in Text(line) }
-                }
-                if let heading = view.parentTextHeading, let text = view.parentText {
-                    Text(heading).font(.headline)
-                    Text(text)
-                }
-                if let heading = view.timelineHeading {
-                    Text(heading).font(.headline)
-                    ForEach(Array(view.timeline.enumerated()), id: \.offset) { _, step in
-                        Text("• \(step)")
-                    }
-                }
-                if let failed = view.updateFailed { Banner(text: failed) }
-            }
-            .padding(16)
-        }
-        .accessibilityIdentifier("case_screen")
+        V3CaseBody(
+            item: current,
+            view: presentation,
+            onBack: onBack,
+            onCopy: { text in
+                Pasteboard.copy(text, expiresAfter: 600)
+                copied = true
+            },
+            onShare: { ShareSheet.present($0) }
+        )
         .task { await poll() }
     }
 

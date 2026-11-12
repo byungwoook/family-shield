@@ -27,9 +27,12 @@ Readings, where the milestone text allows more than one:
   would treat "1" as a static mismatch, and this layer does not hand it
   that digit. Spoken words are not answers.
 - The parent's case JSON is an allowlist. The child's session gets a
-  smaller one (`CHILD_CASE_KEYS`) with nothing from the suspicious message.
-  Last4 only. No code, nonce, or hash. `color` is green, red, yellow, or
-  open. `gather` is static, one_time, answer, or null.
+  smaller one (`CHILD_CASE_KEYS`). It adds the parent membership name that
+  opened the case and, when analysis stored one, only the amount string.
+  It does not add the transcript, the claims object, a name taken from the
+  message, the timeline, or the number. Last4 only on the parent body. No
+  code, nonce, or hash. `color` is green, red, yellow, or open. `gather`
+  is static, one_time, answer, or null.
 - Names are stripped and refused when blank or longer than 200 characters.
   Parent text is capped at 8000 characters. Extra JSON keys are refused
   and the error body does not echo them.
@@ -64,8 +67,9 @@ from backend.api import (
     keypad_action,
     phone_region,
     public_case,
+    request_amount,
 )
-from backend.store import add_member, apply_schema, call_code
+from backend.store import add_member, apply_schema, call_code, save_analysis
 from services.code_webhook import _digits, _yes_no
 
 
@@ -723,6 +727,81 @@ def test_the_child_never_sees_the_suspicious_message(world):
     for key in ("parent_text", "transcript", "claims", "pattern_id", "timeline",
                 "phone_last4", "family_id", "child_display_name"):
         assert key not in child_view.json()
+    assert child_view.json()["asker_display_name"] == "Parent"
+    assert child_view.json()["request_amount"] is None
+
+
+def test_request_amount_keeps_only_a_real_amount():
+    assert request_amount(None) is None
+    assert request_amount({"amount": " unknown "}) is None
+    assert request_amount({"amount": "", "claimed_identity": "Mom"}) is None
+    assert request_amount({"amount": "300만원", "claimed_identity": "엄마"}) == "300만원"
+    assert request_amount({"amount": "x" * 200}) == "x" * 80
+
+
+def test_the_child_sees_who_asked_and_not_the_message(world):
+    client, clock, _provider, conn = world
+    parent = login(client, "선영")
+    child = login(client, "지우", subject="child-amount")
+    family_id = _family(client, parent["token"])
+    member_id = _child(client, parent["token"], family_id, "지우")
+    phone = next_phone()
+    assert _activate(client, parent["token"], member_id, phone, child["user_id"]).status_code == 201
+    clock.advance(timedelta(hours=24))
+    story = "Mom I was arrested, send gift cards, don't tell Dad"
+    case_id = _open(client, parent["token"], member_id, story).json()["id"]
+    save_analysis(
+        conn,
+        UUID(case_id),
+        now=clock.now(),
+        transcript="SECRET TRANSCRIPT do not show",
+        claims={
+            "claimed_identity": "엄마",
+            "amount": "300만원",
+            "story": "arrested don't tell dad",
+            "red_flags": ["secrecy"],
+        },
+        pattern_id="fake_arrest_bail",
+    )
+    conn.commit()
+    child_view = client.get(f"/v1/cases/{case_id}", headers=auth(child["token"]))
+    assert child_view.status_code == 200
+    body = child_view.json()
+    assert list(body) == list(CHILD_CASE_KEYS)
+    assert body["asker_display_name"] == "선영"
+    assert body["request_amount"] == "300만원"
+    for leaked in (
+        "SECRET TRANSCRIPT",
+        "엄마",
+        "arrested",
+        "gift cards",
+        "fake_arrest",
+        "claimed_identity",
+        "red_flags",
+        story,
+    ):
+        assert leaked not in child_view.text
+    listed = client.get(
+        f"/v1/families/{family_id}/cases", headers=auth(parent["token"])
+    )
+    assert listed.status_code == 200
+    row = listed.json()["cases"][0]
+    assert row["request_amount"] == "300만원"
+    assert "claims" not in row
+    assert "arrested" not in listed.text
+    assert "SECRET TRANSCRIPT" not in listed.text
+    save_analysis(
+        conn,
+        UUID(case_id),
+        now=clock.now(),
+        claims={"amount": "unknown", "claimed_identity": "Mom", "story": "hidden story"},
+    )
+    conn.commit()
+    cleared = client.get(f"/v1/cases/{case_id}", headers=auth(child["token"]))
+    assert cleared.json()["request_amount"] is None
+    assert cleared.json()["asker_display_name"] == "선영"
+    assert "Mom" not in cleared.text
+    assert "hidden story" not in cleared.text
 
 
 def test_digit_five_after_a_right_code_is_yellow_no_answer(world):

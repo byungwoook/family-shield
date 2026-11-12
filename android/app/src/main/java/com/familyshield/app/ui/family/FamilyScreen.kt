@@ -1,13 +1,20 @@
 package com.familyshield.app.ui.family
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -35,6 +42,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.familyshield.app.R
 import com.familyshield.app.data.api.CaseSummary
@@ -57,6 +65,7 @@ import java.time.Instant
 fun FamilyRoute(
     viewModel: FamilyViewModel,
     familyName: String,
+    parentName: String = "",
     onOpenCase: (ParentCase) -> Unit,
     onOpenRecent: (String) -> Unit,
     onSignOut: () -> Unit,
@@ -76,6 +85,7 @@ fun FamilyRoute(
     }
     FamilyHomeContent(
         familyName = familyName,
+        parentName = parentName,
         state = state,
         onRefresh = { viewModel.refresh() },
         onSignOut = onSignOut,
@@ -161,80 +171,38 @@ fun FamilyHomeContent(
     onCallOnly: (String) -> Unit,
     onOpenRecent: (CaseSummary) -> Unit,
     now: Instant = Instant.now(),
+    parentName: String = "",
+    initialTab: com.familyshield.app.ui.v3.HomeTab = com.familyshield.app.ui.v3.HomeTab.Home,
+    ticking: Boolean = true,
 ) {
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(familyName.ifBlank { stringResource(R.string.family_title_fallback) }) },
-                actions = {
-                    TextButton(onClick = onRefresh, modifier = Modifier.testTag("refresh")) {
-                        Text(stringResource(R.string.cd_refresh))
-                    }
-                    TextButton(onClick = onSignOut) { Text(stringResource(R.string.action_sign_out)) }
-                },
-            )
-        },
-    ) { padding ->
-        when {
-            state.loading && state.members.isEmpty() && state.error == null -> LoadingBox(Modifier.padding(padding))
-            state.error != null && state.members.isEmpty() ->
-                FailureBox(state.error, onRefresh, Modifier.padding(padding))
-            else -> Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding)
-                    .verticalScroll(rememberScrollState())
-                    .padding(16.dp)
-                    .testTag("family_home"),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                state.notice?.let { NoticeText(it) }
-                if (state.error != null && state.members.isNotEmpty()) ErrorText(state.error)
-                Text(stringResource(R.string.family_children_heading), style = MaterialTheme.typography.titleMedium)
-                val children = state.members.filter { MemberRules.isChild(it) }
-                if (children.isEmpty()) {
-                    Text(stringResource(R.string.family_empty_title), style = MaterialTheme.typography.titleLarge)
-                    Text(stringResource(R.string.family_empty_body))
-                } else {
-                    children.forEach { member ->
-                        ChildCard(
-                            member = member,
-                            now = now,
-                            busy = state.busy,
-                            onVerify = { onVerifyChild(member.id) },
-                            onConfirmJoin = { onConfirmJoin(member.id) },
-                            onRejectJoin = { onRejectJoin(member.id) },
-                            onConfirmPhone = { onConfirmPhone(member.id) },
-                            onRejectPhone = { onRejectPhone(member.id) },
-                            onReissue = { onReissue(member.id) },
-                            onCallOnly = { onCallOnly(member.id) },
-                        )
-                    }
-                }
-                Button(
-                    onClick = onAdd,
-                    modifier = Modifier.fillMaxWidth().testTag("add_child"),
-                ) { Text(stringResource(R.string.family_add_child)) }
-                Button(
-                    onClick = onNewCase,
-                    modifier = Modifier.fillMaxWidth().testTag("verify_message"),
-                ) { Text(stringResource(R.string.family_verify_message)) }
-                HorizontalDivider()
-                Text(stringResource(R.string.family_recent_heading), style = MaterialTheme.typography.titleMedium)
-                if (state.recent.isEmpty()) {
-                    Text(stringResource(R.string.family_recent_empty))
-                } else {
-                    state.recent.forEach { summary ->
-                        RecentRow(summary, onClick = { onOpenRecent(summary) })
-                    }
-                }
-            }
-        }
+    when {
+        state.loading && state.members.isEmpty() && state.error == null -> LoadingBox()
+        state.error != null && state.members.isEmpty() -> FailureBox(state.error, onRefresh)
+        else -> ParentShell(
+            familyName = familyName,
+            parentName = parentName,
+            state = state,
+            now = now,
+            initialTab = initialTab,
+            ticking = ticking,
+            onRefresh = onRefresh,
+            onSignOut = onSignOut,
+            onAdd = onAdd,
+            onVerifyChild = onVerifyChild,
+            onNewCase = onNewCase,
+            onConfirmJoin = onConfirmJoin,
+            onRejectJoin = onRejectJoin,
+            onConfirmPhone = onConfirmPhone,
+            onRejectPhone = onRejectPhone,
+            onReissue = onReissue,
+            onCallOnly = onCallOnly,
+            onOpenRecent = onOpenRecent,
+        )
     }
 }
 
 @Composable
-private fun ChildCard(
+internal fun ChildCard(
     member: Member,
     now: Instant,
     busy: Boolean,
@@ -252,8 +220,7 @@ private fun ChildCard(
     val expires = Times.shortDateTime(member.inviteExpiresAt, locale)
     val name = member.displayName.ifBlank { stringResource(R.string.cd_child) }
     val last4 = member.phoneLast4.orEmpty()
-    Card(modifier = Modifier.fillMaxWidth().testTag("child_${member.id}")) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(Modifier.fillMaxWidth().padding(top = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(name, style = MaterialTheme.typography.titleMedium)
             Text(statusLine(stage, name, last4, expires))
             if (member.awaitingConfirm) {
@@ -289,7 +256,6 @@ private fun ChildCard(
                 modifier = Modifier.testTag("verify_${member.id}"),
             ) { Text(stringResource(R.string.action_verify)) }
         }
-    }
 }
 
 @Composable
@@ -451,7 +417,6 @@ private fun InviteDialog(
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NewCaseContent(
     state: FamilyUiState,
@@ -462,70 +427,91 @@ fun NewCaseContent(
     onVerify: () -> Unit,
     onRemoveAudio: () -> Unit,
 ) {
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.new_case_title)) },
-                navigationIcon = {
-                    TextButton(onClick = onBack) { Text(stringResource(R.string.cd_back)) }
-                },
-            )
-        },
-    ) { padding ->
+    val palette = com.familyshield.app.ui.theme.LocalFsPalette.current
+    val selected = members.firstOrNull { it.id == state.caseChildId }
+    Column(Modifier.fillMaxSize().background(palette.bg)) {
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp),
+            Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(stringResource(R.string.new_case_explain))
-            if (state.fromShare) {
-                Text(stringResource(R.string.new_case_not_sent_yet), modifier = Modifier.testTag("share_held"))
-            }
-            state.draftAudio?.let { audio ->
-                val kilobytes = ((audio.file.length().coerceAtLeast(0L) + 1023L) / 1024L).toInt().coerceAtLeast(1)
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(44.dp).testTag("back").clickable(onClick = onBack), contentAlignment = Alignment.Center) {
+                    com.familyshield.app.ui.v3.CloseIcon(palette.text)
+                }
                 Text(
-                    stringResource(R.string.new_case_audio_attached, audio.displayName, kilobytes),
-                    modifier = Modifier.testTag("draft_audio"),
+                    stringResource(R.string.new_case_title),
+                    modifier = Modifier.weight(1f),
+                    color = palette.text,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    fontFamily = com.familyshield.app.ui.theme.Pretendard,
+                    fontWeight = androidx.compose.ui.text.font.FontWeight(650),
+                    fontSize = 17.sp,
                 )
-                TextButton(onClick = onRemoveAudio, enabled = !state.busy, modifier = Modifier.testTag("remove_audio")) {
-                    Text(stringResource(R.string.new_case_audio_remove))
+                Spacer(Modifier.size(44.dp))
+            }
+            Text(stringResource(R.string.share_kicker), color = palette.muted, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, fontSize = 12.sp)
+            Text(stringResource(R.string.share_who), color = palette.text, fontFamily = com.familyshield.app.ui.theme.Pretendard, fontWeight = androidx.compose.ui.text.font.FontWeight(700), fontSize = 32.sp, lineHeight = 40.sp)
+            state.draftAudio?.let { audio ->
+                Column(
+                    Modifier.fillMaxWidth().clip(androidx.compose.foundation.shape.RoundedCornerShape(24.dp)).background(palette.hero).padding(16.dp).testTag("draft_audio").semantics {
+                        contentDescription = audio.displayName
+                    },
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        com.familyshield.app.ui.v3.PlayIcon(palette.lime)
+                        Text(audio.displayName, color = palette.sheet, modifier = Modifier.padding(start = 8.dp).weight(1f), fontFamily = com.familyshield.app.ui.theme.Pretendard)
+                        Box(
+                            Modifier.size(44.dp).testTag("remove_audio").clickable(enabled = !state.busy, onClick = onRemoveAudio),
+                            contentAlignment = Alignment.Center,
+                        ) { com.familyshield.app.ui.v3.CloseIcon(palette.heroMuted) }
+                    }
+                    com.familyshield.app.ui.v3.Waveform(palette.lime, Modifier.padding(top = 12.dp))
                 }
             }
-            Text(stringResource(R.string.new_case_child_heading), style = MaterialTheme.typography.titleMedium)
             if (members.isEmpty()) {
-                Text(stringResource(R.string.new_case_no_children))
+                Text(stringResource(R.string.new_case_no_children), color = palette.text)
             } else {
-                members.forEach { member ->
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .selectable(selected = state.caseChildId == member.id, onClick = { onSelect(member.id) })
-                            .testTag("pick_${member.id}"),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        RadioButton(selected = state.caseChildId == member.id, onClick = { onSelect(member.id) })
-                        Text(member.displayName)
+                Column(Modifier.clip(androidx.compose.foundation.shape.RoundedCornerShape(24.dp)).background(palette.surface)) {
+                    members.forEach { member ->
+                        Row(
+                            Modifier.fillMaxWidth().selectable(selected = state.caseChildId == member.id, onClick = { onSelect(member.id) }).testTag("pick_${member.id}").padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            com.familyshield.app.ui.v3.InitialAvatar(member.displayName, size = 44.dp)
+                            Column(Modifier.padding(start = 12.dp).weight(1f)) {
+                                Text(member.displayName, color = palette.text, fontFamily = com.familyshield.app.ui.theme.Pretendard, fontWeight = androidx.compose.ui.text.font.FontWeight(650))
+                                member.phoneLast4?.let { Text(stringResource(R.string.family_number_ending, it), color = palette.muted, fontSize = 13.sp) }
+                            }
+                            RadioButton(selected = state.caseChildId == member.id, onClick = { onSelect(member.id) })
+                        }
                     }
                 }
             }
-            OutlinedTextField(
-                value = state.caseText,
-                onValueChange = onText,
-                label = { Text(stringResource(R.string.new_case_text_label)) },
-                supportingText = { Text(stringResource(R.string.new_case_text_hint)) },
-                modifier = Modifier.fillMaxWidth().testTag("case_text"),
-                minLines = 3,
-            )
-            Text(stringResource(R.string.new_case_counter, state.caseText.length, FamilyViewModel.TEXT_LIMIT))
-            Button(
-                onClick = onVerify,
-                enabled = !state.busy && members.isNotEmpty(),
-                modifier = Modifier.fillMaxWidth().testTag("open_case"),
-            ) { Text(stringResource(R.string.new_case_submit)) }
+            if (state.draftAudio == null) {
+                OutlinedTextField(
+                    value = state.caseText,
+                    onValueChange = onText,
+                    label = { Text(stringResource(R.string.new_case_text_label)) },
+                    modifier = Modifier.fillMaxWidth().testTag("case_text"),
+                    minLines = 2,
+                )
+            }
             state.error?.let { ErrorText(it) }
+            Text(
+                stringResource(R.string.new_case_not_sent_yet),
+                color = palette.muted,
+                fontFamily = com.familyshield.app.ui.theme.Pretendard,
+                fontSize = 14.sp,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp).testTag("share_held"),
+            )
+            val label = selected?.let { stringResource(R.string.share_ask, it.displayName) } ?: stringResource(R.string.new_case_submit)
+            com.familyshield.app.ui.v3.LimeButton(
+                label = label,
+                onClick = onVerify,
+                enabled = !state.busy && members.isNotEmpty() && state.caseChildId != null,
+                modifier = Modifier.padding(bottom = 24.dp).testTag("open_case"),
+            )
         }
     }
 }

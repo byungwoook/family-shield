@@ -593,9 +593,10 @@ def user_memberships(conn, user_id: UUID) -> list:
 def family_cases(conn, family_id: UUID, *, limit: int) -> list:
     """The family's most recent cases, newest first, for the parent's list.
 
-    Only the summary columns: no parent text, transcript, claims, pattern,
-    nonce, or code hash. Ties on created_at break on id, descending. The
-    caller checks that the reader is an active parent and bounds `limit`.
+    Summary columns plus `claims`, so the API can copy the amount string
+    and drop the rest. No parent text, transcript, pattern, nonce, or code
+    hash. Ties on created_at break on id, descending. The caller checks
+    that the reader is an active parent and bounds `limit`.
     """
     if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
         raise ValueError("limit must be a positive int")
@@ -604,7 +605,7 @@ def family_cases(conn, family_id: UUID, *, limit: int) -> list:
         """
         SELECT
             c.id, c.child_member_id, m.display_name AS child_display_name,
-            c.state, c.result, c.created_at, c.decided_at
+            c.state, c.result, c.claims, c.deadline_at, c.created_at, c.decided_at
         FROM cases AS c
         JOIN family_members AS m ON m.id = c.child_member_id
         WHERE c.family_id = %s
@@ -613,6 +614,30 @@ def family_cases(conn, family_id: UUID, *, limit: int) -> list:
         """,
         (family_id, limit),
     )
+
+
+def opener_display_name(conn, *, user_id, family_id) -> str:
+    """Membership name of the parent who opened a case.
+
+    This is the account's family name, not a name read out of the message.
+    Empty when that parent row is gone.
+    """
+    if user_id is None or family_id is None:
+        return ""
+    row = _one(
+        conn,
+        """
+        SELECT display_name
+        FROM family_members
+        WHERE user_id = %s AND family_id = %s AND role = 'parent'
+        ORDER BY created_at ASC, id ASC
+        LIMIT 1
+        """,
+        (user_id, family_id),
+    )
+    if row is None or not isinstance(row["display_name"], str):
+        return ""
+    return row["display_name"].strip()
 
 
 def issue_signin_nonce(conn, *, nonce_hash: str, expires_at: datetime, now: datetime) -> None:

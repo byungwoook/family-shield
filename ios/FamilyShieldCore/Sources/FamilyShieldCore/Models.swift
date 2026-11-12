@@ -336,6 +336,8 @@ public struct CaseSummary: Codable, Equatable, Sendable {
     public var state: String
     public var result: String?
     public var color: String
+    public var requestAmount: String?
+    public var deadlineAt: String?
     public var createdAt: String
     public var decidedAt: String?
 
@@ -346,6 +348,8 @@ public struct CaseSummary: Codable, Equatable, Sendable {
         state: String,
         result: String? = nil,
         color: String,
+        requestAmount: String? = nil,
+        deadlineAt: String? = nil,
         createdAt: String,
         decidedAt: String? = nil
     ) {
@@ -355,6 +359,8 @@ public struct CaseSummary: Codable, Equatable, Sendable {
         self.state = state
         self.result = result
         self.color = color
+        self.requestAmount = requestAmount
+        self.deadlineAt = deadlineAt
         self.createdAt = createdAt
         self.decidedAt = decidedAt
     }
