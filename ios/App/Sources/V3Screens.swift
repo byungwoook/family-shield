@@ -1,5 +1,6 @@
 import FamilyShieldCore
 import SwiftUI
+import UIKit
 
 enum FsPalette {
     static func bg(_ scheme: ColorScheme) -> Color {
@@ -613,13 +614,20 @@ struct V3CaseBody: View {
                     Text(CopyCatalog.text(.v3Direct, locale))
                         .font(.system(size: 12, weight: .medium, design: .monospaced))
                         .foregroundStyle(FsPalette.heroMuted)
-                    HStack(alignment: .center, spacing: 12) {
-                        VStack {
+                    HStack(alignment: .center, spacing: 0) {
+                        VStack(spacing: 6) {
                             InitialAvatar(name: view.name, size: 72, background: Color(red: 228 / 255, green: 225 / 255, blue: 216 / 255), foreground: Theme.ink)
                             Text(view.name).font(Theme.font(14)).foregroundStyle(Theme.cream)
                         }
+                        .frame(width: 72)
+                        .padding(.leading, 15)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(CopyCatalog.text(.v3AnswerCaption, locale)).font(Theme.font(12)).foregroundStyle(Theme.ink)
+                            HStack(spacing: 6) {
+                                ScanFaceMark()
+                                Text(CopyCatalog.text(.v3AnswerCaption, locale))
+                                    .font(Theme.font(12, weight: .medium))
+                                    .foregroundStyle(Theme.ink)
+                            }
                             Text(CopyCatalog.text(confirmed ? .childYes : .childNo, locale))
                                 .font(Theme.font(38, weight: .bold))
                                 .foregroundStyle(Theme.ink)
@@ -627,10 +635,32 @@ struct V3CaseBody: View {
                                 .font(Theme.font(14))
                                 .foregroundStyle(Theme.ink)
                         }
-                        .padding(16)
-                        .background(bubble, in: RoundedRectangle(cornerRadius: 18))
+                        .frame(maxWidth: .infinity, minHeight: 128, alignment: .leading)
+                        .padding(.leading, 30)
+                        .padding(.trailing, 20)
+                        .padding(.vertical, 16)
+                        .background(bubble, in: AnswerBubble())
+                        .padding(.leading, 16)
+                        .padding(.trailing, 15)
                     }
-                    Text(headline).font(Theme.font(32, weight: .bold)).foregroundStyle(Theme.cream)
+                    Text(headline)
+                        .font(Theme.font(38, weight: .bold))
+                        .tracking(-1)
+                        .foregroundStyle(Theme.cream)
+                        .padding(.top, 12)
+                    HStack {
+                        if let amount = resultAmount {
+                            Text(CopyCatalog.text(.homeAmountLine, locale, amount))
+                                .font(Theme.font(14))
+                                .foregroundStyle(FsPalette.heroMuted)
+                        }
+                        Spacer(minLength: 8)
+                        if !resultWhen.isEmpty {
+                            Text(resultWhen)
+                                .font(Theme.font(14))
+                                .foregroundStyle(FsPalette.heroMuted)
+                        }
+                    }
                 }
                 .padding(20)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -651,9 +681,7 @@ struct V3CaseBody: View {
                 .font(Theme.font(20, weight: .bold))
                 .foregroundStyle(FsPalette.text(scheme))
                 .accessibilityIdentifier("result_title")
-            Text(shortLine)
-                .font(Theme.font(15))
-                .foregroundStyle(FsPalette.muted(scheme))
+            keptText(shortLine, size: 15, color: FsPalette.muted(scheme))
             Button(CopyCatalog.text(detailsOpen ? .v3DetailsHide : .v3Details, locale)) {
                 detailsOpen.toggle()
             }
@@ -665,7 +693,7 @@ struct V3CaseBody: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 8) {
                         if !view.body.isEmpty {
-                            Text(view.body).font(Theme.font(15)).foregroundStyle(FsPalette.muted(scheme)).accessibilityIdentifier("result_body")
+                            keptText(view.body, size: 15, color: FsPalette.muted(scheme)).accessibilityIdentifier("result_body")
                         }
                         if !confirmed {
                             if let alert = view.familyAlert {
@@ -690,9 +718,9 @@ struct V3CaseBody: View {
                 Button { if let alert = view.familyAlert { onShare(alert) } } label: {
                     Text(CopyCatalog.text(.v3Share, locale))
                         .font(Theme.font(17, weight: .semibold))
-                        .foregroundStyle(scheme == .dark ? Theme.ink : Theme.cream)
+                        .foregroundStyle(Theme.ink)
                         .frame(maxWidth: .infinity, minHeight: 56)
-                        .background(FsPalette.red(scheme), in: RoundedRectangle(cornerRadius: 16))
+                        .background(FsPalette.answerNo, in: RoundedRectangle(cornerRadius: 16))
                 }
                 .buttonStyle(.plain)
             }
@@ -739,5 +767,86 @@ struct V3CaseBody: View {
         guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else { return nil }
         if trimmed.caseInsensitiveCompare("unknown") == .orderedSame { return nil }
         return trimmed
+    }
+
+    private var resultAmount: String? { known(item.claims?.amount) }
+
+    private var resultWhen: String {
+        let time = Times.shortTime(item.decidedAt, locale: .current)
+        guard !time.isEmpty, let date = Times.parse(item.decidedAt) else { return "" }
+        if Calendar.current.isDateInToday(date) {
+            return CopyCatalog.text(.v3Today, locale) + " " + time
+        }
+        if Calendar.current.isDateInYesterday(date) {
+            return CopyCatalog.text(.v3Yesterday, locale) + " " + time
+        }
+        return time
+    }
+}
+
+private func keptText(_ string: String, size: CGFloat, weight: Font.Weight = .regular, color: Color) -> Text {
+    let style = NSMutableParagraphStyle()
+    style.lineBreakStrategy = .hangulWordPriority
+    var container = AttributeContainer()
+    container.font = Font.custom("Pretendard Variable", size: size).weight(weight)
+    container.foregroundColor = color
+    container.paragraphStyle = style
+    return Text(AttributedString(string, attributes: container))
+}
+
+private struct AnswerBubble: Shape {
+    func path(in rect: CGRect) -> Path {
+        let tail: CGFloat = 10
+        let radius: CGFloat = 22
+        var path = Path()
+        let body = CGRect(x: rect.minX + tail, y: rect.minY, width: max(0, rect.width - tail), height: rect.height)
+        path.addRoundedRect(in: body, cornerSize: CGSize(width: radius, height: radius))
+        let midY = rect.midY
+        path.move(to: CGPoint(x: body.minX, y: midY - tail * 0.9))
+        path.addLine(to: CGPoint(x: rect.minX, y: midY))
+        path.addLine(to: CGPoint(x: body.minX, y: midY + tail * 0.75))
+        path.closeSubpath()
+        return path
+    }
+}
+
+private struct ScanFaceMark: View {
+    var body: some View {
+        Canvas { context, size in
+            let ink = GraphicsContext.Shading.color(Theme.ink)
+            let stroke = StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round)
+            func line(_ start: CGPoint, _ end: CGPoint) {
+                var path = Path()
+                path.move(to: start)
+                path.addLine(to: end)
+                context.stroke(path, with: ink, style: stroke)
+            }
+            let width = size.width
+            let inset = width * 0.16
+            let turn = width * 0.42
+            let far = width - inset
+            let back = width - turn
+            line(CGPoint(x: inset, y: turn), CGPoint(x: inset, y: inset))
+            line(CGPoint(x: inset, y: inset), CGPoint(x: turn, y: inset))
+            line(CGPoint(x: far, y: turn), CGPoint(x: far, y: inset))
+            line(CGPoint(x: far, y: inset), CGPoint(x: back, y: inset))
+            line(CGPoint(x: inset, y: back), CGPoint(x: inset, y: far))
+            line(CGPoint(x: inset, y: far), CGPoint(x: turn, y: far))
+            line(CGPoint(x: far, y: back), CGPoint(x: far, y: far))
+            line(CGPoint(x: far, y: far), CGPoint(x: back, y: far))
+            context.fill(Path(ellipseIn: CGRect(x: width * 0.35, y: width * 0.40, width: width * 0.08, height: width * 0.08)), with: ink)
+            context.fill(Path(ellipseIn: CGRect(x: width * 0.57, y: width * 0.40, width: width * 0.08, height: width * 0.08)), with: ink)
+            var smile = Path()
+            smile.addArc(
+                center: CGPoint(x: width * 0.5, y: width * 0.55),
+                radius: width * 0.16,
+                startAngle: .degrees(20),
+                endAngle: .degrees(160),
+                clockwise: false
+            )
+            context.stroke(smile, with: ink, style: stroke)
+        }
+        .frame(width: 16, height: 16)
+        .accessibilityHidden(true)
     }
 }

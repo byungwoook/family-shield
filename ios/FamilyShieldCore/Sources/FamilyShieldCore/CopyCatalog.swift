@@ -1538,7 +1538,7 @@ public enum CopyCatalog {
         .v3HeadlineYes: [.en: "This request matches\nwhat %1$s sent", .ko: "%1$s 보낸\n요청이 맞아요"],
         .v3SheetScam: [.en: "This may be a scam", .ko: "사기가 의심돼요"],
         .v3SheetYes: [.en: "Talk before you send", .ko: "보내기 전, 직접 이야기하세요"],
-        .v3SheetYesBody: [.en: "Contact %1$s directly and check the request once more.", .ko: "%1$s에게 직접 연락해 요청 내용을 한 번 더 확인하세요."],
+        .v3SheetYesBody: [.en: "Contact %1$s directly and\ncheck the request once more.", .ko: "%1$s에게 직접 연락해\n요청 내용을 한 번 더 확인하세요."],
         .v3Done: [.en: "Done checking", .ko: "확인 완료"],
         .v3Share: [.en: "Share a warning with your family", .ko: "가족에게 경고 공유"],
         .v3Today: [.en: "Today", .ko: "오늘"],
@@ -1563,7 +1563,7 @@ public enum CopyCatalog {
         .childAmountLabel: [.en: "Amount in the request", .ko: "요청 금액"],
         .childAmountSource: [.en: "From a voice message", .ko: "음성 메시지로 받은 요청"],
         .childSubmitFace: [.en: "Confirm with Face ID and send", .ko: "Face ID로 답변 보내기"],
-        .v3SheetScamLine: [.en: "Do not send money or reply.", .ko: "돈을 보내거나 답장하지 마세요."],
+        .v3SheetScamLine: [.en: "Do not send money\nor reply.", .ko: "돈을 보내거나\n답장하지 마세요."],
         .v3Details: [.en: "See details", .ko: "자세히 보기"],
         .v3DetailsHide: [.en: "Hide details", .ko: "접기"],
     ]
